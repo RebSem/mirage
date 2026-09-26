@@ -16,3 +16,8 @@ opennsfw2==0.18.0
 keras>=3.0.0
 protobuf>=6.33.5,<8
 pygrabber; sys_platform == 'win32'
+# Mirage (macOS app): virtual camera output + native Cocoa / AVFoundation glue
+pyvirtualcam==0.15.0; sys_platform == 'darwin'
+pyobjc-framework-Cocoa==12.2.2; sys_platform == 'darwin'
+pyobjc-framework-Quartz==12.2.2; sys_platform == 'darwin'
+pyobjc-framework-AVFoundation==12.2.2; sys_platform == 'darwin'
