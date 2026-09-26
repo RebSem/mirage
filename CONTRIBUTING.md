@@ -10,8 +10,13 @@ and the quickest to land.
 git clone https://github.com/RebSem/mirage
 cd mirage
 make install      # Python 3.14 via Homebrew, venv, models
+make dev          # pytest and ruff from requirements-dev.txt
 make run          # start Mirage from the checkout
 ```
+
+You need an Apple Silicon Mac (the installer stops on Intel). Mirage needs
+PySide6 6.9 or newer for its window hints; `requirements.txt` already asks
+for it, so keep that pin if you touch the requirements.
 
 For anything beyond the basics, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 first. It is the contract for how the app is put together.
@@ -45,6 +50,10 @@ it is to pull in upstream improvements later. So:
 make test         # unit tests
 make lint         # lint checks (CI also runs ruff on every pull request)
 ```
+
+Both use the tools that `make dev` installs (pytest and ruff, listed in
+`requirements-dev.txt`), so run it once after `make install`. `make lint`
+also runs shellcheck on `scripts/*.sh` if you have it.
 
 Tests in `tests/mirage/` must run **without models, a camera, network access
 or a display**. Use fakes (for example a fake embedder for the face library)

@@ -7,7 +7,8 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/mirage-hero.png" alt="The Mirage window: live video on the left, a glass sidebar of faces on the right, a big Start button below" width="860">
+  <img src="assets/icon/mirage-256.png" alt="Mirage icon" width="128">
+  <!-- screenshot: docs/images/mirage-hero.png (added once captured) -->
 </p>
 
 Mirage is a small macOS app for real-time face swapping. Pick a photo, press
@@ -39,7 +40,9 @@ camera plumbing, and a pile of stability fixes.
   you your real face back, 🎲 gives you a random generated one.
 - **Simple controls.** Quality presets **Fast / Balanced / Best** (Best adds
   face enhancement), *Keep my mouth* (your own mouth stays visible, so talking
-  looks natural), a blend slider and a sharpness slider.
+  looks natural), a blend slider and a sharpness slider. Under **More**:
+  *Swap everyone in view* (every face in the picture gets the one you picked),
+  *Fix blue tint*, *Smooth edges* and *Show FPS*.
 - **Made for calls.** Video goes straight to **OBS Virtual Camera** at a fixed
   1280×720, so Zoom never sees the stream restart when your webcam changes
   shape. It keeps working with the window minimised, and keeps your Mac awake
@@ -48,17 +51,19 @@ camera plumbing, and a pile of stability fixes.
   brings the window forward). Quitting always releases the camera and stops
   every thread, even in the middle of a call.
 - **A real app.** `Mirage.app` with its own icon, in English and Russian.
-- **Uses the Neural Engine.** On a MacBook Air M1 the swap model takes about
-  63 ms per frame on the Apple Neural Engine versus about 85 ms with the default
-  CoreML setting, roughly a third more fps. Expect 10–15 fps live on an M1.
+- **Fast on Apple Silicon.** About 14 fps live on a MacBook Air M1. The swap
+  model runs on the Apple Neural Engine (about 63 ms per frame, versus about
+  82 ms with the default CoreML setting), while face detection runs on the GPU
+  in its own thread, so the two work at the same time. The live detector looks
+  at a 320-pixel picture: about 9 ms instead of 26 ms at 640.
 
 ## Requirements
 
 | | |
 |---|---|
-| macOS | 14 or newer recommended. The Liquid Glass look needs macOS 26+; older versions get a translucent fallback. |
-| Mac | Apple Silicon recommended (M1 or newer). |
-| Disk | About 3 GB (Python environment and models). |
+| macOS | 14 or newer recommended. The Liquid Glass look needs macOS 26+; older versions get a plain dark window. |
+| Mac | Apple Silicon (M1 or newer) is required; the installer stops on Intel Macs. |
+| Disk | About 4 GB free (Python environment and models). |
 | Tools | [Homebrew](https://brew.sh) and the Xcode Command Line Tools (`xcode-select --install`). |
 | Virtual camera | [OBS Studio](https://obsproject.com) (free). Mirage only borrows its virtual camera; no scenes or sources to set up. |
 
@@ -73,8 +78,11 @@ make install
 `make install` runs `scripts/install.sh`: it installs Python 3.14 with
 Homebrew, creates a virtual environment, downloads the models and offers to
 install OBS. It is safe to run again; finished steps are skipped.
-The face enhancer used by the **Best** preset is an optional extra download
-(about 350 MB): `scripts/install.sh --with-enhancer`.
+
+The **Best** preset adds a face enhancer, GPEN-BFR-256 (about 75 MB). Mirage
+downloads it the first time you choose Best; to get it ahead of time, run
+`scripts/install.sh --with-enhancer`. If it can't be loaded, Mirage switches
+Quality back to **Balanced** and tells you.
 
 Then either run Mirage straight from the checkout:
 
@@ -88,7 +96,12 @@ or build a proper app (`dist/Mirage.app`) and put it in `~/Applications`:
 make app && make install-app
 ```
 
-The first time you press Start, macOS asks for camera access. Say yes. If the
+`Mirage.app` runs the code in the folder you cloned, so don't move or delete
+that folder. If you do move it, run `make install-app` again from the new place.
+
+The first time you press Start, Mirage asks macOS for camera access and waits
+for your answer. Click **Allow** (said no by accident? See
+[Troubleshooting](docs/TROUBLESHOOTING.md#mirage-cant-use-the-camera)). If the
 virtual camera does not show up in Zoom yet, open OBS once and click
 **Start Virtual Camera** once to install its system extension (details in
 [Troubleshooting](docs/TROUBLESHOOTING.md#obs-virtual-camera-is-missing)).
@@ -104,7 +117,8 @@ virtual camera does not show up in Zoom yet, open OBS once and click
 
 Do not press *Start Virtual Camera* inside OBS while Mirage is streaming; they
 would fight over the same camera. If Zoom shows the OBS logo instead of you,
-Mirage is not live yet.
+Mirage is not live yet, or its frames are not getting through (see
+[Troubleshooting](docs/TROUBLESHOOTING.md#zoom-shows-the-obs-logo-or-a-black-picture)).
 
 ## Keyboard shortcuts
 
@@ -115,7 +129,7 @@ Mirage is not live yet.
 | `0` | Your real face |
 | `⌘O` | Add photos |
 | `⌘R` | Random face |
-| `⌘M` | Mirror the preview (the call is never mirrored) |
+| `⌘⇧M` | Mirror the preview (the call is never mirrored) |
 | `⌘Q` | Quit |
 
 ## Tips for a convincing swap
@@ -132,8 +146,9 @@ More in [Troubleshooting](docs/TROUBLESHOOTING.md).
 ## Your data stays on your Mac
 
 All video processing happens locally; your camera feed never leaves the
-machine. The only network use is downloading the models (during install, or
-later if one is missing) and fetching a generated face when you press 🎲.
+machine. The only network use is downloading the models (during install, the
+first time you choose **Best**, or later if one is missing) and fetching a
+generated face from thispersondoesnotexist.com when you press 🎲.
 
 | What | Where |
 |---|---|
@@ -145,7 +160,7 @@ To start from scratch, quit Mirage and delete the first folder.
 ## The classic Deep-Live-Cam UI
 
 The original Deep-Live-Cam window is still here and still works, including the
-things Mirage does not do (image and video files, face mapping, many faces):
+things Mirage does not do (image and video files, face mapping):
 
 ```bash
 make classic        # or: source venv/bin/activate && python run.py
@@ -155,8 +170,8 @@ Its original README is kept at [docs/upstream/README.md](docs/upstream/README.md
 
 ## Project docs
 
-- [Troubleshooting](docs/TROUBLESHOOTING.md): camera permission, missing virtual
-  camera, low fps, install errors, logs.
+- [Troubleshooting](docs/TROUBLESHOOTING.md): camera permission, virtual
+  camera, low fps, install errors, the face library, logs.
 - [Responsible use](docs/RESPONSIBLE_USE.md): the ground rules.
 - [Design](docs/DESIGN.md): how the Liquid Glass window is put together.
 - [Architecture](docs/ARCHITECTURE.md): threads, modules, file layout.
@@ -179,7 +194,12 @@ live.
   would not exist without them.
 - [InsightFace](https://github.com/deepinsight/insightface) for face detection,
   recognition and the swap model.
-- [GFPGAN](https://github.com/TencentARC/GFPGAN) for face enhancement.
+- [GPEN](https://github.com/yangxy/GPEN) for the face enhancement in **Best**
+  (GPEN-BFR-256, converted to ONNX by
+  [Face-Upscalers-ONNX](https://github.com/harisreedhar/Face-Upscalers-ONNX));
+  the classic UI also offers [GFPGAN](https://github.com/TencentARC/GFPGAN).
+- [This Person Does Not Exist](https://thispersondoesnotexist.com) for the
+  generated faces behind 🎲.
 - [OBS Studio](https://obsproject.com) and
   [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) for the virtual
   camera.

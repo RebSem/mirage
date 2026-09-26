@@ -41,13 +41,11 @@ are licensed for non-commercial use only (see [NOTICE.md](../NOTICE.md)).
 
 ## What Mirage does and does not do
 
-- **It runs 100% locally.** Your camera feed and your face library stay on
-  your Mac. Nothing is uploaded; there is no account and no analytics. The
-  only network use is downloading models (during install, or later if one
-  is missing) and fetching a generated face when you press 🎲.
-- The classic Deep-Live-Cam engine that ships with Mirage has an optional
-  **NSFW filter**: start the classic UI with `python run.py --nsfw-filter` to
-  turn it on.
+**It runs 100% locally.** Your camera feed and your face library stay on your
+Mac. Nothing is uploaded; there is no account and no analytics. The only
+network use is downloading models (during install, the first time you choose
+**Best**, or later if one is missing) and fetching a generated face when you
+press 🎲.
 
 ## If something goes wrong
 

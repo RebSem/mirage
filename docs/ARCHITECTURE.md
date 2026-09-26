@@ -17,15 +17,38 @@ docs/               documentation
 ## Runtime picture
 
 ```
-Camera ──► CaptureThread ──► ProcessingThread ──┬─► OBS Virtual Camera (1280x720) ─► Zoom / Meet / OBS
-            (AVFoundation)    detect ▸ swap ▸     │
-                              enhance ▸ blend     └─► UI preview (Qt, ≤30 fps)
+                                ┌─► detect  (GPU, 320 px, paced) ──► latest face boxes
+Camera ─► capture ─► latest ────┤                                          │
+          thread     frame      └─► process (Neural Engine) ◄──────────────┘
+                                    swap ▸ post-process ▸ enhance (Best)
+                                         │
+                                         ├─► OBS Virtual Camera (1280x720) ─► Zoom / Meet
+                                         └─► UI preview (Qt, ≤ 30 fps)
 ```
 
-* **CaptureThread** reads frames and survives short camera gaps (5 s).
-* **ProcessingThread** runs detection every few frames, smooths the face
-  landmarks between detections, swaps with the current face *embedding*, and
-  never dies on a bad frame.
+Three plain Python threads (not `QThread`s, so quitting never hits Qt's
+"QThread: Destroyed while thread is still running" abort) share the newest
+camera frame:
+
+* **capture** (`mirage-capture`) reads the camera, keeps only the newest frame
+  and survives short camera gaps; after 5 s without frames it stops the
+  session with a toast.
+* **detect** (`mirage-detect`) finds the face on the newest frame with the
+  320 px detector on the GPU (CoreML `CPUAndGPU`), smooths the box and
+  keypoints between detections (`tracking.FaceSmoother`), adds mouth landmarks
+  only when *Keep my mouth* is on, and publishes the result. It is paced by the
+  quality preset: Fast waits 0.10 s between detections, Balanced 0.04 s, Best
+  runs back-to-back. It idles while you show your real face. With *Swap
+  everyone in view* it keeps every face instead of the largest one.
+* **process** (`mirage-process`) runs back-to-back on each new frame: swaps
+  every face in the latest boxes with the current face *embedding*, applies
+  post-processing and, on Best, the GPEN-BFR-256 enhancer, then sends the
+  result to the virtual camera and offers it to the preview. It never dies on
+  a bad frame: it logs each new kind of error once, shows a toast and sends
+  the plain camera frame instead.
+* Detection and swapping run in parallel, so the GPU and the Neural Engine are
+  busy at the same time; in one loop each waited for the other (about 100 ms
+  per frame instead of about 65 ms).
 * The **virtual camera** output is always 1280x720, so Zoom never sees the
   stream restart when the webcam switches 4:3 ↔ 16:9.
 * While live, the process holds an `NSProcessInfo` activity (no App Nap, no
@@ -37,13 +60,17 @@ Camera ──► CaptureThread ──► ProcessingThread ──┬─► OBS Vi
 |---|---|
 | `__init__.py` | `__version__`, `APP_NAME = "Mirage"`, `BUNDLE_ID = "io.github.rebsem.mirage"` |
 | `__main__.py` | `python -m mirage` entry |
-| `app.py` | QApplication setup, single instance, logging, signals, lifecycle |
+| `app.py` | QApplication setup, single instance, logging, signals, lifecycle, quit cleanup |
 | `paths.py` | all filesystem locations (see below) |
 | `settings.py` | persisted user settings (JSON) |
 | `library.py` | face library: import photos, thumbnails, cached embeddings |
-| `faces_ai.py` | glue to the upstream detector: photo → `DetectedFace` |
-| `camera.py` | camera discovery (AVFoundation order, uid → OpenCV index) |
-| `engine.py` | `LiveEngine`: capture + processing threads, virtual camera |
+| `upstream.py` | configures the upstream engine once (CoreML, 320 px live detector) |
+| `faces_ai.py` | photo → `DetectedFace` with its own 640 px detector; random faces |
+| `camera.py` | camera discovery (AVFoundation order, uid → OpenCV index), OBS camera check |
+| `engine.py` | `LiveEngine`: capture, detect and process threads, virtual camera |
+| `tracking.py` | `FaceSmoother`: steadies the face box and keypoints between detections |
+| `power.py` | `AwakeGuard`: keeps the Mac awake while live |
+| `demo.py` | a fake "Demo" camera (`python -m mirage --demo face.jpg`) |
 | `glass.py` | native Liquid Glass (`NSGlassEffectView`) behind Qt widgets |
 | `i18n.py` | UI strings, English + Russian |
 | `theme.py` | colours, radii, fonts, Qt style sheet |
@@ -131,16 +158,38 @@ class FaceLibrary:
   centred on the face box enlarged 1.8×, padded if needed) and `<id>.npy`.
 * Writes are atomic (temp file + `os.replace`). Entries whose files went
   missing are dropped on load. Thread-safe with a lock.
+* If `index.json` is missing or damaged, the library is rebuilt from the
+  `<id>.jpg` / `<id>_thumb.jpg` / `<id>.npy` files on load (names reset to
+  "Face", ordered by file time). A damaged index is kept as
+  `index.corrupt-<time>.json` and never overwritten.
+* Photos are detected on a copy capped at 2048 px; HEIC and other formats
+  OpenCV can't read go through macOS `sips`.
 * Default name for `add_file` is the file stem, prettified.
 
 Switching faces is instant because the engine only needs the cached
 512-float embedding, not a new detection.
 
+### `upstream.py`
+
+`configure_upstream()` sets `modules.globals` for Mirage exactly once
+(idempotent, under a lock): headless, CoreML + CPU execution providers, only
+the face swapper as a frame processor, the classic UI's enhancers and face
+mapping off, and `det_size = 320` (`LIVE_DET_SIZE`). It must run before the
+upstream face analyser is first created, because insightface fixes the
+detector size and providers at that point and the analyser is cached. The
+engine's model loading and `faces_ai.embed` both call it first. Faces on a
+webcam are big, so 320 px is enough: about 9 ms per detection on M1 instead
+of about 26 ms at 640.
+
 ### `faces_ai.py`
 
-`embed(image) -> DetectedFace | None` wraps
-`modules.face_analyser` (largest face, padded retry for close-ups) and maps
-the box back to original image coordinates.
+`embed(image) -> DetectedFace | None` uses its own 640x640 detector on the
+CPU (`det_10g.onnx` from `buffalo_l`), not the live one: photos can have
+small faces, and an import can afford about 100 ms. It takes the largest
+face, retries with a dark border (30 %, 60 %) for close-ups, gets the
+embedding from the upstream recognition model and maps the box back to the
+original image coordinates. `fetch_random_face()` downloads a generated face
+from thispersondoesnotexist.com.
 
 ### `camera.py`
 
@@ -156,20 +205,53 @@ def order_devices(devices: list[tuple[str, str, bool]]) -> list[CameraInfo]
     # pure: (name, uid, builtin) in any order → OpenCV indices by uniqueID
     # order, OBS Virtual Camera removed, built-in first
 def list_cameras() -> list[CameraInfo]
-def resolve_index(uid: str) -> int | None
+def virtual_camera_installed() -> bool   # OBS Virtual Camera shows up as a device
+def resolve(uid: str | None, fallback: CameraInfo | None = None) -> CameraInfo | None
 ```
 
 ### `engine.py`
 
-`LiveEngine(QObject)` — signals: `frameReady(object)` (BGR ndarray for the
-preview), `statsChanged(dict)` (`fps`, `face_found`), `stateChanged(str)`
-(`idle` / `loading` / `live` / `stopping`), `message(str, str)` (level, text).
-Methods: `prepare()` (load models in background), `start(camera: CameraInfo)`,
-`stop()`, `set_face(embedding | None)`, `apply(settings)`.
+`LiveEngine(QObject)`. Signals are emitted from worker threads; Qt queues
+them to the UI thread.
 
-Swap runs on the Neural Engine (`MLComputeUnits=CPUAndNeuralEngine`,
-~63 ms/frame on M1 vs ~85 ms with `ALL`); detection runs on the GPU in
-parallel.
+| signal | meaning |
+|---|---|
+| `stateChanged(str)` | `idle` → `loading` (models not ready yet) → `starting` → `live` → `stopping` → `idle` |
+| `modelsState(str)` | `loading` / `ready` / `failed` |
+| `qualityFallback(str)` | Best's enhancer failed to load; the engine dropped to this preset (`balanced`) and the UI moves the Quality control to match |
+| `previewReady()` | a new preview frame is waiting; the UI pulls it with `take_preview()` (at most one pending, the newest wins) |
+| `statsChanged(dict)` | `{"fps": float, "face_found": bool, "vcam": bool}`, about twice a second |
+| `notice(level, i18n_key, args)` | a toast: `info` / `warn` / `error`, a key in `mirage/i18n.py`, format args |
+
+Methods (call them from the UI thread; only `shutdown()` blocks):
+
+* `prepare()`: load the models in the background at launch, so Start is quick.
+* `start(camera: CameraInfo)`: only from `idle`. A worker thread waits for the
+  models, asks macOS for camera access (and waits for the answer), opens the
+  camera and starts the three threads.
+* `stop()`: `stopping`, then `idle` once the threads are down.
+* `shutdown()`: blocking stop for quitting; joins the threads for up to 6 s
+  and never releases the camera under a blocked read.
+* `set_face(embedding | None)`: switch identity instantly; `None` shows the
+  real face.
+* `apply(settings)`: blend, sharpness, mouth mask, many faces, colour fix,
+  smooth edges and quality. Choosing Best loads the enhancer in the background
+  (downloading GPEN-BFR-256 the first time); choosing Best again after a
+  failure retries once.
+* `take_preview()`: the newest preview frame, or `None`.
+
+The swap model runs on the Neural Engine (`MLComputeUnits=CPUAndNeuralEngine`,
+about 63 ms per frame on M1 vs about 82 ms with `ALL`; `make bench` compares
+the compute units on your Mac). Detection runs on the GPU in parallel.
+
+### `app.py`: quitting
+
+`cleanup()` in `app.main()` saves the settings and calls `engine.shutdown()`, exactly once,
+whichever way Mirage ends: the window's `closeEvent` (through the `closing`
+signal), `aboutToQuit`, or `SIGINT` / `SIGTERM`. The `closeEvent` hook is the
+one that matters on macOS: `⌘Q` ends in `[NSApp terminate:]`, which exits the
+process without returning from `exec()` or emitting `aboutToQuit`, but Qt
+closes the windows first.
 
 ### `glass.py`
 
@@ -178,7 +260,7 @@ content view and a behind-window blur, then keeps one `NSGlassEffectView`
 per registered widget exactly behind that widget (tracking move/resize/show).
 An *ambient* layer (a heavily blurred, tiny copy of the live video) sits
 under the glass so the glass refracts the colours of your own video. On
-anything other than macOS 26+ it degrades to a translucent Qt fill.
+anything other than macOS 26+ (or with Reduce transparency on) the window is a plain opaque dark background and panels paint a subtle translucent fill.
 
 Native view order inside the window frame (bottom → top):
 `NSVisualEffectView` (behind-window blur) → ambient layer →
@@ -190,8 +272,9 @@ Native view order inside the window frame (bottom → top):
   under the stage. One primary action: **Start / Stop**.
 * Faces are big round thumbnails; click or press `1`–`9` to switch, `0` for
   the real face. Drag photos in to add them.
-* Every state has words: *Loading models…*, *Live · 14 fps*, *No face in
-  view*, *Virtual camera: ready*.
+* Every state has words: *Loading models…*, *Starting camera…*,
+  *Live · 14 fps*, *Looking for your face…*, *Nothing is reaching OBS Virtual
+  Camera*.
 * No modal error dialogs during live; use glass toasts.
 
 ## Tests

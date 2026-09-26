@@ -1,11 +1,12 @@
 """Live pipeline: camera → face swap → OBS Virtual Camera + preview.
 
-Two plain Python threads do the work (Python threads avoid Qt's
+Three plain Python threads do the work (Python threads avoid Qt's
 "QThread destroyed while running" abort on quit):
 
 * capture: reads the camera, keeps only the newest frame, survives short gaps
-* processing: detect (every few frames) → smooth → swap → post-process →
-  virtual camera, and hands the newest result to the UI
+* detect: finds and smooths the face on the GPU, paced by the quality preset
+* process: swap (Neural Engine) → post-process → virtual camera, and hands
+  the newest result to the UI
 
 The UI talks to the engine only through methods and Qt signals, all of which
 are safe to call from the UI thread.

@@ -8,32 +8,41 @@ attached is the fastest way to get help.
 - [Mirage can't use the camera](#mirage-cant-use-the-camera)
 - [OBS Virtual Camera is missing](#obs-virtual-camera-is-missing)
 - [Zoom shows the OBS logo or a black picture](#zoom-shows-the-obs-logo-or-a-black-picture)
+- [“Nothing is reaching OBS Virtual Camera”](#nothing-is-reaching-obs-virtual-camera)
 - [Low fps, choppy video](#low-fps-choppy-video)
 - [“No face found” in a photo](#no-face-found-in-a-photo)
 - [“Looking for your face…” while live](#looking-for-your-face-while-live)
 - [The wrong camera is used](#the-wrong-camera-is-used)
+- [Face names reset to “Face”](#face-names-reset-to-face)
 - [Install problems](#install-problems)
 - [Where the logs are](#where-the-logs-are)
 - [Reset or uninstall](#reset-or-uninstall)
 
 ## Mirage can't use the camera
 
-You see *“The camera didn't start”* or the preview stays empty.
+The first time you press **Start**, Mirage asks macOS for camera access and
+waits for your answer. Click **Allow** and it goes live.
+
+If you clicked *Don't Allow*, Mirage says *“Mirage isn't allowed to use the
+camera”*. To change your mind:
 
 1. Open **System Settings → Privacy & Security → Camera** and turn on
    **Mirage**.
 2. If you started Mirage from a terminal (`make run`), macOS asks on behalf of
    the terminal app, so turn on **Terminal** (or iTerm, or whatever you use)
    instead.
-3. Quit and reopen Mirage after changing the setting.
-4. If it still fails, quit other apps that use the webcam (Zoom, FaceTime,
-   Photo Booth) or switch them to *OBS Virtual Camera*, then press Start
-   again.
+3. Press **Start** again. No need to restart Mirage.
+
+If you see *“The camera didn't start”* or the preview stays empty, quit other
+apps that use the webcam (Zoom, FaceTime, Photo Booth) or switch them to
+*OBS Virtual Camera*, then press Start again. If you have more than one
+camera, also check that the right one is picked (see
+[The wrong camera is used](#the-wrong-camera-is-used)).
 
 ## OBS Virtual Camera is missing
 
-Zoom has no *OBS Virtual Camera* in its list, or Mirage says *“OBS Virtual
-Camera isn't installed”*.
+Zoom has no *OBS Virtual Camera* in its list, or Mirage's top bar says
+*“OBS Virtual Camera isn't installed”*.
 
 The virtual camera is a macOS system extension that OBS installs the first
 time you use it. You only need to do this once:
@@ -50,22 +59,42 @@ time you use it. You only need to do this once:
 
 ## Zoom shows the OBS logo or a black picture
 
-That placeholder means nothing is feeding the virtual camera: **Mirage is not
-live**. Press **Start** (or `Space`) in Mirage and wait for *Live*.
+That placeholder means nothing is feeding the virtual camera. Usually
+**Mirage is not live**: press **Start** (or `Space`) in Mirage and wait for
+*Live*.
 
-If Mirage is live and Zoom still shows the logo:
+If Mirage is live and Zoom still shows the logo, look at Mirage's top bar:
 
-- Make sure OBS itself is **not** running its own virtual camera. Only one
-  app can feed it; click *Stop Virtual Camera* in OBS or quit OBS.
-- In Zoom → **Settings → Video → Camera**, pick another camera and then
-  *OBS Virtual Camera* again.
+- *“Sending to OBS Virtual Camera”*: frames are going out, so Zoom just has
+  not caught up. In Zoom → **Settings → Video → Camera**, pick another camera
+  and then *OBS Virtual Camera* again, or restart Zoom.
+- *“Nothing is reaching OBS Virtual Camera”*: see the next section.
+
+### “Nothing is reaching OBS Virtual Camera”
+
+Mirage shows this in its top bar (with a short toast) when it has been live
+for a few seconds but OBS's camera extension is not receiving its frames.
+Your preview keeps working; only the call misses out. Usually it is one of
+these:
+
+- **OBS is running its own virtual camera.** Only one app can feed it; click
+  *Stop Virtual Camera* in OBS or quit OBS.
+- **The OBS camera extension is not installed or not allowed.** Follow
+  [OBS Virtual Camera is missing](#obs-virtual-camera-is-missing).
+
+Mirage keeps trying every few seconds, so once that is fixed the top bar
+usually switches to *“Sending to OBS Virtual Camera”* on its own. If it does
+not, press **Stop** and **Start** again.
 
 ## Low fps, choppy video
 
-On a MacBook Air M1, 10–15 fps live is normal. If you get less:
+On a MacBook Air M1, about 14 fps live is normal (fewer with **Best**). If
+you get less:
 
 - Choose the **Fast** preset. **Best** adds face enhancement, which is the
   most expensive step; keep it off unless you really need it.
+- Turn off *Swap everyone in view* (under **More**) unless you need it; every
+  extra face in the picture costs another swap.
 - Plug in the charger and turn off Low Power Mode.
 - Close heavy apps: browsers with many tabs, other video apps, games,
   anything exporting video.
@@ -100,6 +129,20 @@ by the camera's ID, so an iPhone with Continuity Camera turning up later does
 not steal the slot. OBS Virtual Camera is never offered as an input, because
 Mirage writes to it.
 
+## Face names reset to “Face”
+
+Mirage keeps the list of your faces in `faces/index.json` inside
+`~/Library/Application Support/Mirage`. If that file gets damaged (say, a
+crash or a full disk at the wrong moment), Mirage rebuilds the list from the
+saved face files the next time it starts. Your faces come back, in the order
+you added them, but their names reset to *Face*: right-click a face and
+choose **Rename…** to fix them. The damaged file is kept next to them as
+`faces/index.corrupt-<time>.json`, in case you want to copy the old names
+from it.
+
+If the saved data of a single face is damaged, Mirage shows your real face
+instead and tells you; remove that face and add its photo again.
+
 ## Install problems
 
 `make install` is safe to run again at any time; it skips whatever is
@@ -132,13 +175,26 @@ Check your connection and run `make install` again; downloads pick up where
 they stopped. If Mirage says *“Models are missing”*, the same command fixes
 it.
 
+Downloads check the server's security certificate. A certificate error
+(`CERTIFICATE_VERIFY_FAILED`) means something on your network, such as a
+company proxy or antivirus software, is intercepting the connection; try
+another network.
+
 ### “Face enhancement isn't available”
 
-The **Best** preset needs the optional face enhancer model. Download it with:
+The **Best** preset uses the GPEN-BFR-256 face enhancer (about 75 MB), which
+Mirage downloads the first time you choose Best. If it can't be downloaded or
+loaded, Mirage switches Quality back to **Balanced** and says *“Face
+enhancement isn't available; using Balanced”*, so your call carries on.
+
+Check your connection and choose **Best** again; Mirage tries once more. Or
+download the enhancer ahead of time:
 
 ```bash
 scripts/install.sh --with-enhancer
 ```
+
+The [logs](#where-the-logs-are) say what went wrong.
 
 ## Where the logs are
 
