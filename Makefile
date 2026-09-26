@@ -5,7 +5,7 @@ RUFF_VERSION := 0.15.7
 RUFF := $(or $(wildcard venv/bin/ruff),$(shell command -v ruff 2>/dev/null),uvx ruff@$(RUFF_VERSION))
 
 .DEFAULT_GOAL := help
-.PHONY: help install run classic app install-app icon test lint bench clean
+.PHONY: help install dev run classic app install-app icon test lint bench clean
 
 help: ## Show this list
 	@printf "\033[1mMirage\033[0m, real-time face swap for macOS\n\n"
@@ -14,6 +14,9 @@ help: ## Show this list
 
 install: ## Set up Python, packages, models and OBS (safe to re-run)
 	scripts/install.sh $(ARGS)
+
+dev: $(PY) ## Install test/lint tools (pytest, ruff) into the venv
+	$(PY) -m pip install -q -r requirements-dev.txt
 
 run: $(PY) ## Start Mirage
 	$(PY) -m mirage
@@ -31,6 +34,7 @@ icon: $(PY) ## Redraw the app icon into assets/icon
 	$(PY) scripts/make_icon.py
 
 test: $(PY) ## Run the Mirage unit tests (no models or camera needed)
+	@$(PY) -c "import pytest" 2>/dev/null || $(MAKE) --no-print-directory dev
 	$(PY) -m pytest -q tests/mirage
 
 lint: ## Lint Python with ruff (and shell scripts with shellcheck, if installed)

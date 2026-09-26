@@ -84,7 +84,7 @@ ARCH="$(uname -m)"
 if [[ "$ARCH" == "arm64" ]]; then
   ok "Apple Silicon ($(sysctl -n machdep.cpu.brand_string 2>/dev/null || echo arm64))"
 else
-  warn "This is an Intel Mac ($ARCH). Mirage runs, but without the Neural Engine it will be slow."
+  die "Mirage needs an Apple Silicon Mac (M1 or newer); this one is $ARCH. Its pinned packages don't install on Intel."
 fi
 FREE_GB="$(df -g "$REPO" 2>/dev/null | awk 'NR == 2 { print $4 }')"
 if [[ -n "$FREE_GB" && "$FREE_GB" -lt 4 ]]; then
@@ -172,7 +172,8 @@ fi
 # ── 6. models ───────────────────────────────────────────────────────────────
 step "Downloading models"
 MODELS=("inswapper_128_fp16.onnx")
-if [[ $WITH_ENHANCER -eq 1 ]]; then MODELS+=("gfpgan-1024.onnx"); fi
+# "Best" quality uses GPEN-BFR-256 (modules/processors/frame/face_enhancer_gpen256.py)
+if [[ $WITH_ENHANCER -eq 1 ]]; then MODELS+=("GPEN-BFR-256.onnx"); fi
 info "face swap: ${MODELS[*]}; face detection: buffalo_l"
 (
   cd "$REPO"
