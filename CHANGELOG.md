@@ -18,7 +18,7 @@ wearing a different face on video calls, just for fun.
 ### Added
 
 - One-window app with native macOS Liquid Glass (`NSGlassEffectView`) that
-  refracts an ambient glow of your own video; a translucent fallback on macOS
+  refracts an ambient glow of your own video; a plain dark window on macOS
   older than 26.
 - Live preview stage with one big Start/Stop button and a status line for
   every state.
