@@ -35,6 +35,7 @@ class FaceTile(QWidget):
         self._spin = 0.0
         self.setFixedSize(TILE_W, TILE_H)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(f"{name} ({number})" if number else name)
         if face_id == ME:
             self.setToolTip(tr("face_me_hint"))
         if face_id == BUSY:

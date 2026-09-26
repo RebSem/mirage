@@ -21,7 +21,8 @@ class Stage(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, False)
         self.setMinimumSize(560, 340)
-        self.mode = "idle"            # idle | loading | live
+        self.mode = "idle"            # idle | loading | starting | live
+        self.drop_active = False
         self.mirror = True
         self.show_fps = False
         self.fps = 0.0
@@ -36,9 +37,13 @@ class Stage(QWidget):
 
     # ── state ────────────────────────────────────────────────────────────
 
+    def set_drop_active(self, on: bool) -> None:
+        self.drop_active = on
+        self.update()
+
     def set_mode(self, mode: str) -> None:
         self.mode = mode
-        if mode == "loading":
+        if mode in ("loading", "starting"):
             self._spinner.start()
         else:
             self._spinner.stop()
@@ -84,7 +89,7 @@ class Stage(QWidget):
             self._paint_video(p, r)
             p.setClipping(False)
             self._paint_overlays(p, r)
-        elif self.mode == "loading":
+        elif self.mode in ("loading", "starting"):
             p.setClipping(False)
             self._paint_loading(p, r)
         else:
@@ -94,6 +99,8 @@ class Stage(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 30), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), radius, radius)
+        if self.drop_active:
+            self._paint_drop(p, r, radius)
 
     def _paint_video(self, p: QPainter, r: QRectF) -> None:
         img = self._image
@@ -166,5 +173,14 @@ class Stage(QWidget):
         p.drawEllipse(ring)
         p.setPen(QPen(QColor(255, 255, 255, 230), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawArc(ring, int(-self._spin * 16), 100 * 16)
+        if self.mode == "starting":
+            self._centered_text(p, r, c.y() + 4, tr("status_starting"), 17, theme.TEXT, theme.QFont.Weight.DemiBold)
+            return
         self._centered_text(p, r, c.y() + 4, tr("loading_title"), 17, theme.TEXT, theme.QFont.Weight.DemiBold)
         self._centered_text(p, r, c.y() + 36, tr("loading_subtitle"), 12.5, theme.TEXT_SECONDARY)
+
+    def _paint_drop(self, p: QPainter, r: QRectF, radius: float) -> None:
+        p.setBrush(QColor(12, 12, 20, 170))
+        p.setPen(QPen(theme.ACCENT, 2, Qt.PenStyle.DashLine))
+        p.drawRoundedRect(r.adjusted(6, 6, -6, -6), radius - 4, radius - 4)
+        self._centered_text(p, r, r.center().y() - 14, tr("drop_hint"), 17, theme.TEXT, theme.QFont.Weight.DemiBold)

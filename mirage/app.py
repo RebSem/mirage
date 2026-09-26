@@ -67,6 +67,20 @@ def _set_dock_icon() -> None:
         pass
 
 
+def _dark_appearance() -> None:
+    """Mirage is always dark: dialogs and menus match the glass window."""
+    if sys.platform != "darwin":
+        return
+    try:
+        import AppKit
+
+        AppKit.NSApplication.sharedApplication().setAppearance_(
+            AppKit.NSAppearance.appearanceNamed_(AppKit.NSAppearanceNameDarkAqua)
+        )
+    except Exception:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mirage", description="Mirage — real-time face swap for macOS")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
@@ -105,13 +119,20 @@ def main(argv: list[str] | None = None) -> int:
     server = QLocalServer()
     server.listen(mirage.BUNDLE_ID)
 
+    from PySide6.QtCore import QLibraryInfo, QTranslator
+
     from mirage import faces_ai, i18n, settings as settings_mod
     from mirage.engine import LiveEngine
     from mirage.library import FaceLibrary
     from mirage.ui.main_window import MainWindow
 
     settings = settings_mod.load()
-    i18n.set_language(settings.language)
+    if i18n.set_language(settings.language) == "ru":
+        # Qt's own strings: dialog buttons, the app menu, file dialogs
+        qt_ru = QTranslator(app)
+        if qt_ru.load("qtbase_ru", QLibraryInfo.path(QLibraryInfo.LibraryPath.TranslationsPath)):
+            app.installTranslator(qt_ru)
+    _dark_appearance()
     engine = LiveEngine()
     library = FaceLibrary(paths.faces_dir(), faces_ai.embed)
     window = MainWindow(engine, library, settings, settings_mod.save, demo_photo=args.demo)

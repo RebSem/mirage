@@ -119,7 +119,7 @@ class ToastHost(QWidget):
         y = self.height() - 64
         for t in reversed(self._toasts):
             x = (self.width() - t.width()) // 2
-            offset = int((1 - t._t) * 8)
+            offset = int((1 - t._t) * theme.TOAST_SLIDE_PX)
             t.move(x, y - t.height() + offset)
             y -= t.height() + 8
         # only the toasts take clicks; the rest of the overlay stays click-through

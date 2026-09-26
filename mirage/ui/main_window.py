@@ -83,6 +83,14 @@ class MainWindow(QWidget):
         self._random_count = 0
         self._last_ambient = 0.0
         self._cameras: list[cameras.CameraInfo] = []
+        self._models_state = "loading"
+        self._vcam_installed = cameras.virtual_camera_installed()
+        self._live_since: float | None = None
+        self._vcam_warned = False
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(500)
+        self._save_timer.timeout.connect(lambda: self._save_settings(self.settings))
 
         self.setObjectName("root")
         self.setWindowTitle(mirage.APP_NAME)
@@ -119,11 +127,6 @@ class MainWindow(QWidget):
             except Exception:
                 pass
 
-        self._save_timer = QTimer(self)
-        self._save_timer.setSingleShot(True)
-        self._save_timer.setInterval(500)
-        self._save_timer.timeout.connect(lambda: self._save_settings(self.settings))
-
     # ── layout ───────────────────────────────────────────────────────────
 
     def _build(self) -> None:
@@ -144,7 +147,7 @@ class MainWindow(QWidget):
         self.vcam_label.setObjectName("hint")
         self.vcam_label.setFont(theme.font(12))
         help_btn = IconButton("help", tr("vcam_help"), 26)
-        help_btn.clicked.connect(lambda: self._open_doc("docs/TROUBLESHOOTING.md"))
+        help_btn.clicked.connect(self._open_vcam_help)
         tl.addWidget(title)
         tl.addWidget(self.status)
         tl.addStretch(1)
@@ -253,7 +256,7 @@ class MainWindow(QWidget):
         self._action(file_menu, tr("menu_random_face"), "Ctrl+R", self.random_face)
         live_menu = bar.addMenu(tr("menu_live"))
         self._action(live_menu, tr("menu_start_stop"), None, self.toggle_live)
-        self._action(live_menu, tr("menu_mirror"), "Ctrl+M", lambda: self.mirror_btn.toggle())
+        self._action(live_menu, tr("menu_mirror"), "Ctrl+Shift+M", lambda: self.mirror_btn.toggle())
         faces_menu = bar.addMenu(tr("menu_faces"))
         self._action(faces_menu, tr("menu_me"), None, lambda: self._select_face(None))
         help_menu = bar.addMenu(tr("menu_help"))
@@ -286,33 +289,53 @@ class MainWindow(QWidget):
 
     def _wire_engine(self) -> None:
         self.engine.stateChanged.connect(self._on_state)
-        self.engine.modelsState.connect(lambda _s: self._on_state(self.engine.state))
+        self.engine.modelsState.connect(self._on_models_state)
+        self.engine.qualityFallback.connect(self._on_quality_fallback)
         self.engine.previewReady.connect(self._on_preview)
         self.engine.statsChanged.connect(self._on_stats)
         self.engine.notice.connect(lambda level, key, args: self.toast(tr(key, **args), level))
+
+    def _on_models_state(self, state: str) -> None:
+        self._models_state = state
+        self._on_state(self.engine.state)
+
+    def _on_quality_fallback(self, quality: str) -> None:
+        self.look.quality.set_value(quality)
+        self.look.quality_hint.setText(tr(f"quality_hint_{quality}"))
+        self._set("quality", quality)
 
     def _on_state(self, state: str) -> None:
         if state == eng.LIVE:
             self.primary.set_mode("stop", tr("stop"))
             self.stage.set_mode("live")
             self.status.set_status(tr("status_live"), theme.LIVE, pulse=True)
-        elif state in (eng.LOADING, eng.STARTING):
-            self.primary.set_mode("busy", tr("status_loading") if state == eng.LOADING else tr("status_starting"))
+            self._live_since, self._vcam_warned = time.monotonic(), False
+        elif state == eng.LOADING:
+            self.primary.set_mode("busy", tr("status_loading"))
             self.stage.set_mode("loading")
-            self.status.set_status(tr("status_loading") if state == eng.LOADING else tr("status_starting"),
-                                   theme.WARN, pulse=True)
+            self.status.set_status(tr("status_loading"), theme.WARN, pulse=True)
+        elif state == eng.STARTING:
+            self.primary.set_mode("busy", tr("status_starting"))
+            self.stage.set_mode("starting")
+            self.status.set_status(tr("status_starting"), theme.WARN, pulse=True)
         elif state == eng.STOPPING:
             self.primary.set_mode("busy", tr("status_stopping"))
+            self.stage.set_mode("idle")
             self.status.set_status(tr("status_stopping"), theme.TEXT_TERTIARY)
         else:
             self.primary.set_mode("start", tr("start"))
             self.stage.set_mode("idle")
-            if self.engine.models_ready:
+            if self._models_state == "failed":
+                self.status.set_status(tr("status_models_failed"), theme.LIVE)
+            elif self.engine.models_ready:
                 self.status.set_status(tr("status_ready"), theme.READY)
             else:  # Start still works; it just waits for the warm-up to finish
                 self.status.set_status(tr("status_warming"), theme.WARN, pulse=True)
             self.glass.set_ambient(None)
+        if state != eng.LIVE:
+            self._live_since = None
         self.camera_combo.setEnabled(state == eng.IDLE)
+        self._vcam_installed = cameras.virtual_camera_installed()
         self._refresh_vcam_hint()
 
     def _on_preview(self) -> None:
@@ -334,12 +357,23 @@ class MainWindow(QWidget):
         self._refresh_vcam_hint(streaming=bool(stats.get("vcam")))
 
     def _refresh_vcam_hint(self, streaming: bool = False) -> None:
+        live_for = time.monotonic() - self._live_since if self._live_since is not None else 0.0
         if streaming:
             self.vcam_label.setText(tr("vcam_streaming"))
-        elif cameras.virtual_camera_installed():
+        elif self._live_since is not None and live_for > 3.0:
+            # Live, but nothing reaches the virtual camera (OBS extension missing/blocked).
+            self.vcam_label.setText(tr("vcam_not_receiving"))
+            if not self._vcam_warned:
+                self._vcam_warned = True
+                self.toast(tr("toast_vcam_unavailable"), "warn")
+        elif self._vcam_installed:
             self.vcam_label.setText(tr("vcam_ready"))
         else:
             self.vcam_label.setText(tr("vcam_missing"))
+
+    def _open_vcam_help(self) -> None:
+        anchor = "#zoom-shows-the-obs-logo-or-a-black-picture" if self._vcam_installed else "#obs-virtual-camera-is-missing"
+        self._open_doc("docs/TROUBLESHOOTING.md" + anchor)
 
     # ── live ─────────────────────────────────────────────────────────────
 
@@ -372,7 +406,7 @@ class MainWindow(QWidget):
         else:
             self.camera_combo.addItems([c.name for c in cams])
             uids = [c.uid for c in cams]
-            self.camera_combo.setCurrentIndex(0 if self._demo else (uids.index(wanted) if wanted in uids else 0))
+            self.camera_combo.setCurrentIndex(uids.index(wanted) if wanted in uids else 0)
         self.camera_combo.blockSignals(False)
 
     def _on_camera_picked(self, idx: int) -> None:
@@ -412,8 +446,13 @@ class MainWindow(QWidget):
             if entry is None:
                 face_id = None
             else:
-                embedding = self.library.embedding(face_id)
-                name = entry.name
+                try:
+                    embedding = self.library.embedding(face_id)
+                    name = entry.name
+                except Exception:
+                    log.exception("could not load the embedding of %s", face_id)
+                    self.toast(tr("toast_face_unreadable", name=entry.name), "warn")
+                    face_id, embedding = None, None
         self.engine.set_face(embedding)
         self.stage.face_name = name
         self.grid.set_selected(face_id)
@@ -440,8 +479,10 @@ class MainWindow(QWidget):
         if ok and name.strip():
             self.library.rename(face_id, name.strip())
             self._reload_faces()
-            if self.settings.face_id == face_id:
-                self.stage.face_name = name.strip()
+            stored = self.library.get(face_id)
+            if stored is not None and self.settings.face_id == face_id:
+                self.stage.face_name = stored.name
+                self.stage.update()
 
     def _reveal(self, face_id: str) -> None:
         import subprocess
@@ -452,6 +493,15 @@ class MainWindow(QWidget):
         entry = self.library.get(face_id)
         if entry is None:
             return
+        text = tr("remove_confirm_text", name=entry.name)
+        if self.settings.face_id == face_id and self.engine.state == eng.LIVE:
+            text += "\n\n" + tr("remove_confirm_live")
+        box = QMessageBox(QMessageBox.Icon.Question, tr("remove_confirm_title"), text, parent=self)
+        remove_btn = box.addButton(tr("remove"), QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+        if box.clickedButton() is not remove_btn:
+            return
         self.library.remove(face_id)
         if self.settings.face_id == face_id:
             self._select_face(None)
@@ -461,7 +511,7 @@ class MainWindow(QWidget):
     def add_photos(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
             self, tr("file_dialog_title"), str(Path.home() / "Pictures"),
-            "Images (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.tif *.tiff)",
+            tr("file_filter_images") + " (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.tif *.tiff)",
         )
         if files:
             self._import([Path(f) for f in files])
@@ -479,9 +529,9 @@ class MainWindow(QWidget):
                     results.append(("no_face", path.name))
                 except (UnreadableImageError, OSError):
                     results.append(("unreadable", path.name))
-                except Exception as exc:
+                except Exception:
                     log.exception("import failed for %s", path)
-                    results.append(("unreadable", f"{path.name} ({exc})"))
+                    results.append(("failed", path.name))
             self.importDone.emit(results)
 
         threading.Thread(target=work, name="mirage-import", daemon=True).start()
@@ -495,6 +545,8 @@ class MainWindow(QWidget):
                 self.toast(tr("toast_no_face_photo", name=payload), "warn")
             elif kind == "unreadable":
                 self.toast(tr("toast_unreadable", name=payload), "warn")
+            elif kind == "failed":
+                self.toast(tr("toast_import_failed", name=payload), "error")
         if len(added) == 1:
             self.toast(tr("toast_added", name=added[0].name))
             self._select_face(added[0].id)
@@ -513,10 +565,15 @@ class MainWindow(QWidget):
 
             try:
                 image = fetch_random_face()
+            except Exception as exc:  # network, or the site changed
+                log.warning("random face download failed: %s", exc)
+                self.randomDone.emit((None, "network"))
+                return
+            try:
                 self.randomDone.emit((self.library.add_image(image, name), None))
-            except Exception as exc:
-                log.warning("random face failed: %s", exc)
-                self.randomDone.emit((None, exc))
+            except Exception:
+                log.exception("random face import failed")
+                self.randomDone.emit((None, "import"))
 
         threading.Thread(target=work, name="mirage-random", daemon=True).start()
 
@@ -525,7 +582,8 @@ class MainWindow(QWidget):
         self._busy_imports = max(0, self._busy_imports - 1)
         self._reload_faces()
         if entry is None:
-            self.toast(tr("toast_random_failed"), "warn")
+            self.toast(tr("toast_random_failed") if error == "network"
+                       else tr("toast_import_failed", name=tr("random_face")), "warn")
         else:
             self._select_face(entry.id)
 
@@ -539,8 +597,13 @@ class MainWindow(QWidget):
     def dragEnterEvent(self, event) -> None:  # noqa: N802
         if self._dropped_images(event):
             event.acceptProposedAction()
+            self.stage.set_drop_active(True)
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802
+        self.stage.set_drop_active(False)
 
     def dropEvent(self, event) -> None:  # noqa: N802
+        self.stage.set_drop_active(False)
         files = self._dropped_images(event)
         if files:
             event.acceptProposedAction()
@@ -585,6 +648,14 @@ class MainWindow(QWidget):
         for panel in (self.stage_frame, self.bar, self.sidebar):
             panel.native_glass = self.glass.native  # falls back to painted glass if install failed
             panel.update()
+
+    def paintEvent(self, event) -> None:  # noqa: N802
+        if not self.glass.native:  # no native glass: an opaque dark window, not a see-through one
+            from PySide6.QtGui import QPainter
+
+            p = QPainter(self)
+            p.fillRect(self.rect(), theme.FALLBACK_WINDOW)
+        super().paintEvent(event)
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.closing.emit()
