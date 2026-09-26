@@ -1,5 +1,4 @@
 import os
-import platform
 import ssl
 import threading
 import urllib.error
@@ -33,9 +32,14 @@ CHUNK_SIZE = 1024 * 256
 
 
 def _ssl_context():
-    if platform.system().lower() == "darwin":
-        return ssl._create_unverified_context()
-    return None
+    """Verified TLS. macOS Pythons often lack a CA bundle, so prefer certifi's
+    instead of turning verification off (downloads are model weights we execute)."""
+    try:
+        import certifi
+
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
 
 
 def _lock_for(key: str) -> threading.Lock:
