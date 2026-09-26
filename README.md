@@ -1,438 +1,198 @@
-<h1 align="center">Deep-Live-Cam 2.1.6</h1>
+<p align="right"><b>English</b> · <a href="README.ru.md">Русский</a></p>
+
+<h1 align="center">Mirage</h1>
 
 <p align="center">
-  Real-time face swap and video deepfake with a single click and only a single image.
+  Wear a different face on your video calls. Live, on your Mac, just for fun.
 </p>
 
 <p align="center">
-<a href="https://trendshift.io/repositories/11395" target="_blank"><img src="https://trendshift.io/api/badge/repositories/11395" alt="hacksider%2FDeep-Live-Cam | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+  <img src="docs/images/mirage-hero.png" alt="The Mirage window: live video on the left, a glass sidebar of faces on the right, a big Start button below" width="860">
 </p>
 
-<p align="center">
-  <img src="media/demo.gif" alt="Demo GIF" width="800">
-</p>
+Mirage is a small macOS app for real-time face swapping. Pick a photo, press
+**Start**, and in Zoom or Meet you show up as your friend (who said yes), a
+generated stranger, or yourself again with one key.
 
-##  Disclaimer
+It is a hobby project: a nicer, macOS-native frontend with Apple's Liquid Glass
+look, built on top of the excellent open-source
+[Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) engine by hacksider
+and contributors. The heavy lifting (face detection, the swap model, the
+enhancers) is theirs. Mirage adds the window, the face library, the virtual
+camera plumbing, and a pile of stability fixes.
 
-This deepfake software is designed to be a productive tool for the AI-generated media industry. It can assist artists in animating custom characters, creating engaging content, and even using models for clothing design.
+> [!IMPORTANT]
+> **Consent first.** Only use someone else's face if they are fine with it, and
+> tell people in the call when it is a joke. Mirage is for personal,
+> non-commercial fun: the face models it relies on are licensed for
+> non-commercial use only. Please read [Responsible use](docs/RESPONSIBLE_USE.md)
+> (it is short).
 
-We are aware of the potential for unethical applications and are committed to preventative measures. A built-in check prevents the program from processing inappropriate media (nudity, graphic content, sensitive material like war footage, etc.). We will continue to develop this project responsibly, adhering to the law and ethics. We may shut down the project or add watermarks if legally required.
+## What it does
 
-- Ethical Use: Users are expected to use this software responsibly and legally. If using a real person's face, obtain their consent and clearly label any output as a deepfake when sharing online.
+- **One window, Liquid Glass.** A live preview stage and one big Start/Stop
+  button. The sidebar and control bar are native macOS glass
+  (`NSGlassEffectView`) that refracts a soft glow of your own video.
+- **A face library.** Drag photos into the sidebar. Faces show up as big round
+  thumbnails. Click one or press `1`–`9` to switch instantly (the face
+  embeddings are cached, so there is no re-detection). `0` (the *Me* tile) gives
+  you your real face back, 🎲 gives you a random generated one.
+- **Simple controls.** Quality presets **Fast / Balanced / Best** (Best adds
+  face enhancement), *Keep my mouth* (your own mouth stays visible, so talking
+  looks natural), a blend slider and a sharpness slider.
+- **Made for calls.** Video goes straight to **OBS Virtual Camera** at a fixed
+  1280×720, so Zoom never sees the stream restart when your webcam changes
+  shape. It keeps working with the window minimised, and keeps your Mac awake
+  while you are live.
+- **Starts and quits cleanly.** Only one copy runs (launching it again just
+  brings the window forward). Quitting always releases the camera and stops
+  every thread, even in the middle of a call.
+- **A real app.** `Mirage.app` with its own icon, in English and Russian.
+- **Uses the Neural Engine.** On a MacBook Air M1 the swap model takes about
+  63 ms per frame on the Apple Neural Engine versus about 85 ms with the default
+  CoreML setting, roughly a third more fps. Expect 10–15 fps live on an M1.
 
-- Content Restrictions: The software includes built-in checks to prevent processing inappropriate media, such as nudity, graphic content, or sensitive material.
+## Requirements
 
-- Legal Compliance: We adhere to all relevant laws and ethical guidelines. If legally required, we may shut down the project or add watermarks to the output.
+| | |
+|---|---|
+| macOS | 14 or newer recommended. The Liquid Glass look needs macOS 26+; older versions get a translucent fallback. |
+| Mac | Apple Silicon recommended (M1 or newer). |
+| Disk | About 3 GB (Python environment and models). |
+| Tools | [Homebrew](https://brew.sh) and the Xcode Command Line Tools (`xcode-select --install`). |
+| Virtual camera | [OBS Studio](https://obsproject.com) (free). Mirage only borrows its virtual camera; no scenes or sources to set up. |
 
-- User Responsibility: We are not responsible for end-user actions. Users must ensure their use of the software aligns with ethical standards and legal requirements.
-
-By using this software, you agree to these terms and commit to using it in a manner that respects the rights and dignity of others.
-
-Users are expected to use this software responsibly and legally. If using a real person's face, obtain their consent and clearly label any output as a deepfake when sharing online. We are not responsible for end-user actions.
-
-## Pre-built Deep-Live-Cam 2.7.5 Ultimate!
-
-<p align="center">
-  <a href="https://deeplivecam.net/index.php/quickstart">
-    <img src="https://github.com/user-attachments/assets/fa2cdf79-c933-4b93-844a-b087192261ed" width="100%" alt="Lite / Ultimate Download Banner">
-  </a>
-</p>
-
-<p align="center">
-<a href="https://deeplivecam.net/index.php/plans/nvidia-gpu?plan_id=0&group_id=1">
-  <img src="https://github.com/user-attachments/assets/56b61811-3a1e-4672-9b50-cf7f6e8e6852" width="40" alt="Windows">
-</a>
-  &nbsp;&nbsp;&nbsp;
-<a href="https://deeplivecam.net/index.php/plans/nvidia-gpu?plan_id=0&group_id=2">
-  <img src="https://github.com/user-attachments/assets/6538e3a6-c957-431a-b586-2d6abcf534dc" width="34" alt="Mac Silicon">
-</a>
-  &nbsp;&nbsp;&nbsp;
-<a href="https://deeplivecam.net/index.php/plans/nvidia-gpu?plan_id=0&group_id=3">
-  <img src="https://github.com/user-attachments/assets/ad45142e-426c-4364-a2a9-a512670cc62c" width="40" alt="CPU">
-</a>
-</p>
-
-<p align="center">
-  <strong>Windows • Mac Silicon • CPU • NVIDIA • AMD</strong>
-</p>
-
-<p align="center">
-  Builds optimized for your hardware.
-</p>
-
-<p align="center">
-  <a href="https://deeplivecam.net/index.php/quickstart">
-    <img src="media/Download.png" width="280" alt="Download">
-  </a>
-</p>
-
-> **Ultimate** includes **30+ exclusive features**, performance optimizations, and **priority support** We only have a single official website which is https://deeplivecam.net . Please be careful on where you download other versions of this application aside from that website and this github repo.
-
-Perfect if you want the fastest setup with **zero manual installation**, pre-configured dependencies, and optimized builds for every supported platform.
-
-## TLDR; Live Deepfake in just 3 Clicks
-![easysteps](https://github.com/user-attachments/assets/af825228-852c-411b-b787-ffd9aac72fc6)
-1. Select a face
-2. Select which camera to use
-3. Press live!
-
-## Features & Uses - Everything is in real-time
-
-### Mouth Mask
-
-**Retain your original mouth for accurate movement using Mouth Mask**
-
-<p align="center">
-  <img src="media/ludwig.gif" alt="resizable-gif">
-</p>
-
-### Face Mapping
-
-**Use different faces on multiple subjects simultaneously**
-
-<p align="center">
-  <img src="media/streamers.gif" alt="face_mapping_source">
-</p>
-
-### Your Movie, Your Face
-
-**Watch movies with any face in real-time**
-
-<p align="center">
-  <img src="media/movie.gif" alt="movie">
-</p>
-
-### Live Show
-
-**Run Live shows and performances**
-
-<p align="center">
-  <img src="media/live_show.gif" alt="show">
-</p>
-
-### Memes
-
-**Create Your Most Viral Meme Yet**
-
-<p align="center">
-  <img src="media/meme.gif" alt="show" width="450"> 
-  <br>
-  <sub>Created using Many Faces feature in Deep-Live-Cam</sub>
-</p>
-
-### Omegle
-
-**Surprise people on Omegle**
-
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/2e9b9b82-fa04-4b70-9f56-b1f68e7672d0" width="450" controls></video>
-</p>
-
-## Installation (Manual)
-
-**Please be aware that the installation requires technical skills and is not for beginners. Consider downloading the quickstart version.**
-
-<details>
-<summary>Click to see the process</summary>
-
-### Installation
-
-This is more likely to work on your computer but will be slower as it utilizes the CPU.
-
-**1. Set up Your Platform**
-
--   Python (3.14 recommended; 3.11-3.14 supported)
--   pip
--   git
--   [ffmpeg](https://www.youtube.com/watch?v=OlNWCpFdVMA) - ```iex (irm ffmpeg.tc.ht)```
--   [Visual Studio 2022 Runtimes (Windows)](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
-
-**2. Clone the Repository**
+## Install
 
 ```bash
-git clone --depth 1 https://github.com/hacksider/Deep-Live-Cam.git
-cd Deep-Live-Cam
+git clone https://github.com/RebSem/mirage
+cd mirage
+make install
 ```
 
-**3. Download the Models**
+`make install` runs `scripts/install.sh`: it installs Python 3.14 with
+Homebrew, creates a virtual environment, downloads the models and offers to
+install OBS. It is safe to run again; finished steps are skipped.
+The face enhancer used by the **Best** preset is an optional extra download
+(about 350 MB): `scripts/install.sh --with-enhancer`.
 
-1. [gfpgan-1024.onnx](https://huggingface.co/hacksider/deep-live-cam/resolve/main/gfpgan-1024.onnx)
-2. [inswapper\_128\_fp16.onnx](https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx)
-
-Place these files in the "**models**" folder.
-
-**4. Install Dependencies**
-
-We highly recommend using a `venv` to avoid issues.
-
-
-For Windows:
-```bash
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
-For Linux:
-```bash
-# Ensure you use the installed Python 3.14
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**For macOS:**
-
-Apple Silicon (M1 through M5) requires specific setup:
+Then either run Mirage straight from the checkout:
 
 ```bash
-# Install Python 3.14
-brew install python@3.14
-
-# Install tkinter package (required for the GUI)
-brew install python-tk@3.14
-
-# Create and activate virtual environment with Python 3.14
-python3.14 -m venv venv
-source venv/bin/activate
-
-# Install dependencies
-pip install -r requirements.txt
+make run
 ```
 
-** In case something goes wrong and you need to reinstall the virtual environment **
+or build a proper app (`dist/Mirage.app`) and put it in `~/Applications`:
 
 ```bash
-# Deactivate the virtual environment
-rm -rf venv
-
-# Reinstall the virtual environment
-python -m venv venv
-source venv/bin/activate
-
-# install the dependencies again
-pip install -r requirements.txt
-
-# gfpgan and basicsrs issue fix
-pip install git+https://github.com/xinntao/BasicSR.git@master
-pip uninstall gfpgan -y
-pip install git+https://github.com/TencentARC/GFPGAN.git@master
+make app && make install-app
 ```
 
-**Run:** If you don't have a GPU, you can run Deep-Live-Cam using `python run.py`. Note that initial execution will download models (~300MB).
+The first time you press Start, macOS asks for camera access. Say yes. If the
+virtual camera does not show up in Zoom yet, open OBS once and click
+**Start Virtual Camera** once to install its system extension (details in
+[Troubleshooting](docs/TROUBLESHOOTING.md#obs-virtual-camera-is-missing)).
 
-### GPU Acceleration
+## Use it in Zoom (or Meet, or anything else)
 
-**CUDA Execution Provider (Nvidia)**
+1. Open Mirage and pick a face (or `0` to stay yourself for now).
+2. Press **Start** (or `Space`). Wait for *Live*.
+3. In Zoom → **Settings → Video → Camera**, choose **OBS Virtual Camera**.
+   In Google Meet and other apps it is the same idea: pick
+   *OBS Virtual Camera* as your camera.
+4. Switch faces during the call with `1`–`9`. Press `0` to be yourself again.
 
-1. Install [CUDA Toolkit 12.8.0](https://developer.nvidia.com/cuda-12-8-0-download-archive)
-2. Install [cuDNN v8.9.7 for CUDA 12.x](https://developer.nvidia.com/rdp/cudnn-archive) (required for onnxruntime-gpu):
-   - Download cuDNN v8.9.7 for CUDA 12.x
-   - Make sure the cuDNN bin directory is in your system PATH
-3. Install dependencies:
+Do not press *Start Virtual Camera* inside OBS while Mirage is streaming; they
+would fight over the same camera. If Zoom shows the OBS logo instead of you,
+Mirage is not live yet.
+
+## Keyboard shortcuts
+
+| Key | Action |
+|---|---|
+| `Space` | Start / Stop |
+| `1` – `9` | Switch to face 1–9 |
+| `0` | Your real face |
+| `⌘O` | Add photos |
+| `⌘R` | Random face |
+| `⌘M` | Mirror the preview (the call is never mirrored) |
+| `⌘Q` | Quit |
+
+## Tips for a convincing swap
+
+- Use a sharp, front-facing, evenly lit photo, one face per picture.
+- Light your own face from the front; a window behind you makes everything
+  harder.
+- On a MacBook Air, plug in the charger and start with **Fast**. The Air has no
+  fan and slows down when it gets hot.
+- Turn on *Keep my mouth* if the mouth looks rubbery while you talk.
+
+More in [Troubleshooting](docs/TROUBLESHOOTING.md).
+
+## Your data stays on your Mac
+
+All video processing happens locally; your camera feed never leaves the
+machine. The only network use is downloading the models (during install, or
+later if one is missing) and fetching a generated face when you press 🎲.
+
+| What | Where |
+|---|---|
+| Faces and settings | `~/Library/Application Support/Mirage` |
+| Logs | `~/Library/Logs/Mirage` |
+
+To start from scratch, quit Mirage and delete the first folder.
+
+## The classic Deep-Live-Cam UI
+
+The original Deep-Live-Cam window is still here and still works, including the
+things Mirage does not do (image and video files, face mapping, many faces):
 
 ```bash
-pip install -U torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
-pip uninstall onnxruntime onnxruntime-gpu
-pip install onnxruntime-gpu==1.26.0
+make classic        # or: source venv/bin/activate && python run.py
 ```
 
-3. Usage:
+Its original README is kept at [docs/upstream/README.md](docs/upstream/README.md).
 
-```bash
-python run.py --execution-provider cuda
-```
+## Project docs
 
-**CoreML Execution Provider (Apple Silicon)**
+- [Troubleshooting](docs/TROUBLESHOOTING.md): camera permission, missing virtual
+  camera, low fps, install errors, logs.
+- [Responsible use](docs/RESPONSIBLE_USE.md): the ground rules.
+- [Design](docs/DESIGN.md): how the Liquid Glass window is put together.
+- [Architecture](docs/ARCHITECTURE.md): threads, modules, file layout.
+- [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
+- [Notice](NOTICE.md): what changed versus upstream, third-party licenses.
 
-Apple Silicon (M1 through M5) specific installation:
+## Contributing
 
-1. Make sure you've completed the macOS setup above using Python 3.14.
-2. No extra install step is needed — `requirements.txt` pulls the official
-   `onnxruntime` build, whose macOS wheels ship the CoreML execution provider.
-   If you previously installed the unmaintained `onnxruntime-silicon` fork,
-   remove it first, as it shadows the real package:
-
-```bash
-pip uninstall onnxruntime-silicon
-pip install -r requirements.txt
-```
-
-3. Usage:
-
-```bash
-python3.14 run.py --execution-provider coreml
-```
-
-**Important Notes for macOS:**
-- Python 3.11 is the minimum (onnxruntime dropped 3.10); 3.14 is recommended
-- Always run with `python3.14` command not just `python` if you have multiple Python versions installed
-- If you get error about `_tkinter` missing, reinstall the tkinter package: `brew reinstall python-tk@3.14`
-- If you get model loading errors, check that your models are in the correct folder
-- If you encounter conflicts with other Python versions, consider uninstalling them:
-  ```bash
-  # List all installed Python versions
-  brew list | grep python
-
-  # Uninstall conflicting versions if needed
-  brew uninstall --ignore-dependencies python@3.11
-
-  # Keep only Python 3.14
-  brew cleanup
-  ```
-
-**CoreML Execution Provider (Apple Legacy)**
-
-1. Install dependencies:
-
-```bash
-pip uninstall onnxruntime onnxruntime-coreml
-pip install onnxruntime-coreml==1.21.0
-```
-
-2. Usage:
-
-```bash
-python run.py --execution-provider coreml
-```
-
-**DirectML Execution Provider (Windows)**
-
-1. Install dependencies:
-
-```bash
-pip uninstall onnxruntime onnxruntime-directml
-pip install onnxruntime-directml==1.21.0
-```
-
-2. Usage:
-
-```bash
-python run.py --execution-provider directml
-```
-
-**OpenVINO™ Execution Provider (Intel)**
-
-1. Install dependencies:
-
-```bash
-pip uninstall onnxruntime onnxruntime-openvino
-pip install onnxruntime-openvino==1.21.0
-```
-
-**Note:** `onnxruntime-openvino` newer than 1.21.0 must be installed together with `openvino`, and the two versions must correspond one-to-one. The supported pairings are:
-
-| onnxruntime-openvino | OpenVINO |
-| --- | --- |
-| 1.24.1 | 2025.4.1 |
-| 1.23.0 | 2025.3 |
-| 1.22.0 | 2025.1 |
-
-```bash
-# Example: onnxruntime-openvino 1.24.1 pairs with OpenVINO 2025.4.1
-pip install openvino==2025.4.1
-pip install onnxruntime-openvino==1.24.1
-```
-
-See the [OpenVINO Execution Provider requirements](https://onnxruntime.ai/docs/execution-providers/OpenVINO-ExecutionProvider.html#requirements) for the full version-mapping details.
-
-2. Usage:
-
-```bash
-python run.py --execution-provider openvino
-```
-</details>
-
-## Usage
-
-**1. Image/Video Mode**
-
--   Execute `python run.py`.
--   Choose a source face image and a target image/video.
--   Click "Start".
--   The output will be saved in a directory named after the target video.
-
-**2. Webcam Mode**
-
--   Execute `python run.py`.
--   Select a source face image.
--   Click "Live".
--   Wait for the preview to appear (10-30 seconds).
--   Use a screen capture tool like OBS to stream.
--   To change the face, select a new source image.
-
-## Download all models in this huggingface link
-- [**Download models here**](https://huggingface.co/hacksider/deep-live-cam/tree/main)
-
-## Command Line Arguments (Unmaintained)
-
-```
-options:
-  -h, --help                                               show this help message and exit
-  -s SOURCE_PATH, --source SOURCE_PATH                     select a source image
-  -t TARGET_PATH, --target TARGET_PATH                     select a target image or video
-  -o OUTPUT_PATH, --output OUTPUT_PATH                     select output file or directory
-  --frame-processor FRAME_PROCESSOR [FRAME_PROCESSOR ...]  frame processors (choices: face_swapper, face_enhancer, ...)
-  --keep-fps                                               keep original fps
-  --keep-audio                                             keep original audio
-  --keep-frames                                            keep temporary frames
-  --many-faces                                             process every face
-  --map-faces                                              map source target faces
-  --mouth-mask                                             mask the mouth region
-  --video-encoder {libx264,libx265,libvpx-vp9}             adjust output video encoder
-  --video-quality [0-51]                                   adjust output video quality
-  --live-mirror                                            the live camera display as you see it in the front-facing camera frame
-  --live-resizable                                         the live camera frame is resizable
-  --max-memory MAX_MEMORY                                  maximum amount of RAM in GB
-  --execution-provider {cpu} [{cpu} ...]                   available execution provider (choices: cpu, ...)
-  --execution-threads EXECUTION_THREADS                    number of execution threads
-  -v, --version                                            show program's version number and exit
-```
-
-Looking for a CLI mode? Using the -s/--source argument will make the run program in cli mode.
-
-## Press
-
- - [**Ars Technica**](https://arstechnica.com/information-technology/2024/08/new-ai-tool-enables-real-time-face-swapping-on-webcams-raising-fraud-concerns/) - *"Deep-Live-Cam goes viral, allowing anyone to become a digital doppelganger"*
- - [**Yahoo!**](https://www.yahoo.com/tech/ok-viral-ai-live-stream-080041056.html) - *"OK, this viral AI live stream software is truly terrifying"*
- - [**CNN Brasil**](https://www.cnnbrasil.com.br/tecnologia/ia-consegue-clonar-rostos-na-webcam-entenda-funcionamento/) - *"AI can clone faces on webcam; understand how it works"*
- - [**Bloomberg Technoz**](https://www.bloombergtechnoz.com/detail-news/71032/kenalan-dengan-teknologi-deep-live-cam-bisa-jadi-alat-menipu) - *"Get to know Deep Live Cam technology, it can be used as a tool for deception."*
- - [**TrendMicro**](https://www.trendmicro.com/vinfo/gb/security/news/cyber-attacks/ai-vs-ai-deepfakes-and-ekyc) - *"AI vs AI: DeepFakes and eKYC"*
- - [**PetaPixel**](https://petapixel.com/2024/08/14/deep-live-cam-deepfake-ai-tool-lets-you-become-anyone-in-a-video-call-with-single-photo-mark-zuckerberg-jd-vance-elon-musk/) - *"Deepfake AI Tool Lets You Become Anyone in a Video Call With Single Photo"*
- - [**SomeOrdinaryGamers**](https://www.youtube.com/watch?time_continue=1074&v=py4Tc-Y8BcY) - *"That's Crazy, Oh God. That's Fucking Freaky Dude... That's So Wild Dude"*
- - [**IShowSpeed**](https://www.youtube.com/live/mFsCe7AIxq8?feature=shared&t=2686) - *"Alright look look look, now look chat, we can do any face we want to look like chat"*
- - [**TechLinked (Linus Tech Tips)**](https://www.youtube.com/watch?v=wnCghLjqv3s&t=551s) - *"They do a pretty good job matching poses, expression and even the lighting"*
- - [**IShowSpeed**](https://youtu.be/JbUPRmXRUtE?t=3964) - *"What the F***! Why do I look like Vinny Jr? I look exactly like Vinny Jr!? No, this shit is crazy! Bro This is F*** Crazy!"*
-
+Bug reports and small pull requests are very welcome. This is a spare-time
+project, so replies may be slow, but they will come. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for how to run the tests and where things
+live.
 
 ## Credits
 
--   [ffmpeg](https://ffmpeg.org/): for making video-related operations easy
--   [Henry](https://github.com/henryruhs): One of the major contributor in this repo
--   [deepinsight](https://github.com/deepinsight): for their [insightface](https://github.com/deepinsight/insightface) project which provided a well-made library and models. Please be reminded that the [use of the model is for non-commercial research purposes only](https://github.com/deepinsight/insightface?tab=readme-ov-file#license).
--   [havok2-htwo](https://github.com/havok2-htwo): for sharing the code for webcam
--   [GosuDRM](https://github.com/GosuDRM): for the open version of roop
--   [pereiraroland26](https://github.com/pereiraroland26): Multiple faces support
--   [vic4key](https://github.com/vic4key): For supporting/contributing to this project
--   [kier007](https://github.com/kier007): for improving the user experience
--   [qitianai](https://github.com/qitianai): for multi-lingual support
--   [laurigates](https://github.com/laurigates): Decoupling stuffs to make everything faster!
--   [maxwbuckley](https://github.com/maxwbuckley): For making the effort to optimize this for mac!
--   and [all developers](https://github.com/hacksider/Deep-Live-Cam/graphs/contributors) behind libraries used in this project.
--   Footnote: Please be informed that the base author of the code is [s0md3v](https://github.com/s0md3v/roop)
--   All the wonderful users who helped make this project go viral by starring the repo ❤️
+- [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) by
+  [hacksider](https://github.com/hacksider) and
+  [all its contributors](https://github.com/hacksider/Deep-Live-Cam/graphs/contributors),
+  itself based on [roop](https://github.com/s0md3v/roop) by s0md3v. Mirage
+  would not exist without them.
+- [InsightFace](https://github.com/deepinsight/insightface) for face detection,
+  recognition and the swap model.
+- [GFPGAN](https://github.com/TencentARC/GFPGAN) for face enhancement.
+- [OBS Studio](https://obsproject.com) and
+  [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) for the virtual
+  camera.
+- [Qt for Python](https://doc.qt.io/qtforpython-6/),
+  [ONNX Runtime](https://onnxruntime.ai) and [OpenCV](https://opencv.org).
 
-[![Stargazers](https://reporoster.com/stars/hacksider/Deep-Live-Cam)](https://github.com/hacksider/Deep-Live-Cam/stargazers)
+## License
 
-## Contributions
+Mirage is a modified version of Deep-Live-Cam and, like it, is licensed under
+the [GNU AGPL-3.0](LICENSE). The pretrained face models come with their own
+terms (InsightFace models are for non-commercial research use only), which is
+why Mirage is a just-for-fun, non-commercial project. See [NOTICE.md](NOTICE.md)
+for the full picture.
 
-![Alt](https://repobeats.axiom.co/api/embed/fec8e29c45dfdb9c5916f3a7830e1249308d20e1.svg "Repobeats analytics image")
-
-## Stars to the Moon 🚀
-
-<a href="https://star-history.com/#hacksider/deep-live-cam&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=hacksider/deep-live-cam&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=hacksider/deep-live-cam&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=hacksider/deep-live-cam&type=Date" />
- </picture>
-</a>
+Mirage is not affiliated with Apple, Zoom, Google, OBS or the Deep-Live-Cam
+team.
