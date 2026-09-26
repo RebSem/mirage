@@ -1,26 +1,37 @@
-***[Remove this]The issue would be closed without notice and be considered spam if the template is not followed.***
+---
+name: Bug report
+about: Something in Mirage is broken or behaves strangely
+title: ""
+labels: bug
+---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+<!-- Thanks! Please check docs/TROUBLESHOOTING.md first; many camera and OBS
+problems are solved there. -->
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+**What happened**
+A short description. What did you expect instead?
 
-**Error Message**
+**Steps to reproduce**
+1.
+2.
+3.
 
-`<The error message in terminal>`
+**Your setup**
+- Mac model (e.g. MacBook Air M1, 8 GB):
+- macOS version:
+- Mirage version (Mirage → About Mirage) or commit:
+- Started via: Mirage.app / `make run` / classic UI (`python run.py`)
+- Video app, if relevant (Zoom, Meet, …):
 
-**Desktop (please complete the following information):**
- - OS: [e.g. Windows]
- - Version [e.g. 22]
- - GPU
- - CPU
+**Log**
+The end of the newest file in `~/Library/Logs/Mirage` (Help → Show Logs).
+Skim it for anything private before pasting.
 
-**Additional context**
-Add any other context about the problem here.
+```
+paste here
+```
 
-**Confirmation (Mandatory)**
-- [ ] I have followed the template
-- [ ] This is not a query about how to increase performance
-- [ ] I have checked the issues page, and this is not a duplicate
+**Screenshot**
+Optional. Please use your own face or a generated one, not someone else's.
 
+- [ ] I read [Troubleshooting](https://github.com/RebSem/mirage/blob/main/docs/TROUBLESHOOTING.md) and searched existing issues.
