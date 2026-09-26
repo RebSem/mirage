@@ -115,6 +115,11 @@ def send(frame) -> None:
             _retry_at = time.monotonic() + RETRY_SECONDS
 
 
+def is_streaming() -> bool:
+    """True while frames are going out to the virtual camera."""
+    return _cam is not None
+
+
 def close() -> None:
     """Release the camera; the next live session opens it again."""
     global _retry_at
