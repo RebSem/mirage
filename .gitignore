@@ -29,3 +29,11 @@ switch_states.json
 install.bat
 /.claude
 *.bat
+
+# Mirage build output
+dist/
+build/
+
+# Tracked images despite the "*.png" rule above (Mirage.icns is tracked too)
+!assets/**/*.png
+!docs/images/*.png
