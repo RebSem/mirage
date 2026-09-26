@@ -7,3 +7,7 @@ target-version = "py310"
 # left out of the gate for now. Intentional side-effect imports should be
 # annotated with `# noqa: F401`.
 select = ["E701", "E711", "E712", "F401", "F541"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
