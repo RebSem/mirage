@@ -273,7 +273,10 @@ def get_face_swapper() -> Any:
                             "CoreMLExecutionProvider",
                             {
                                 "ModelFormat": "MLProgram",
-                                "MLComputeUnits": "ALL",  # Use Neural Engine + GPU + CPU
+                                # Neural Engine only: ~63 ms/frame on M1 vs ~85 ms
+                                # with "ALL" (scripts/benchmark.py), and it leaves the
+                                # GPU free for face detection running in parallel.
+                                "MLComputeUnits": "CPUAndNeuralEngine",
                                 "SpecializationStrategy": "FastPrediction",
                                 "AllowLowPrecisionAccumulationOnGPU": 1,
                                 "EnableOnSubgraphs": 1,
