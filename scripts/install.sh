@@ -25,7 +25,7 @@ Sets up Mirage in $REPO:
   5. checks for OBS, which provides the virtual camera Zoom and Meet see
 
 Options:
-  --with-enhancer  also download the GFPGAN face enhancer (~350 MB)
+  --with-enhancer  also download the GPEN-BFR-256 face enhancer used by Best (~75 MB)
   --yes, -y        answer yes to every question (installs OBS if missing)
   --help, -h       show this help
 

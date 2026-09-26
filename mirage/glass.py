@@ -11,8 +11,8 @@ top:
     QNSView              all Qt widgets, transparent background
 
 so the glass refracts the colours of your own video. Without macOS 26+
-(or with "Reduce transparency" on) ``native`` is False and widgets paint a
-translucent fill themselves.
+(or with "Reduce transparency" on) ``native`` is False: the window paints an
+opaque dark background and the panels a subtle translucent fill.
 """
 
 from __future__ import annotations
