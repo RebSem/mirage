@@ -23,6 +23,7 @@ from collections import deque
 import time
 
 FACE_SWAPPER = None
+FACE_SWAPPER_LOAD_FAILED = False  # don't retry a 277MB load on every live frame
 THREAD_LOCK = threading.Lock()
 NAME = "DLC.FACE-SWAPPER"
 
@@ -231,10 +232,10 @@ def pre_start() -> bool:
 
 
 def get_face_swapper() -> Any:
-    global FACE_SWAPPER
+    global FACE_SWAPPER, FACE_SWAPPER_LOAD_FAILED
 
     with THREAD_LOCK:
-        if FACE_SWAPPER is None:
+        if FACE_SWAPPER is None and not FACE_SWAPPER_LOAD_FAILED:
             # Prefer FP16 on GPUs with Tensor Cores (Turing+) — half the
             # memory bandwidth, faster inference.  Fall back to FP32 for
             # older GPUs (e.g. GTX 16xx) where FP16 can produce NaN.
@@ -257,7 +258,10 @@ def get_face_swapper() -> Any:
             # the Neural Engine instead of bouncing between CPU and ANE.
             if IS_APPLE_SILICON:
                 from modules.onnx_optimize import optimize_for_coreml
-                model_path = optimize_for_coreml(model_path)
+                try:
+                    model_path = optimize_for_coreml(model_path)
+                except Exception as e:
+                    print(f"[{NAME}] CoreML rewrite failed, using original model: {e}")
 
             update_status(f"Loading face swapper model from: {model_path}", NAME)
             try:
@@ -298,6 +302,7 @@ def get_face_swapper() -> Any:
             except Exception as e:
                 update_status(f"Error loading face swapper model: {e}", NAME)
                 FACE_SWAPPER = None
+                FACE_SWAPPER_LOAD_FAILED = True
                 return None
     return FACE_SWAPPER
 
@@ -514,7 +519,6 @@ def swap_face(source_face: Face, target_face: Face, temp_frame: Frame) -> Frame:
     """Optimized face swapping with better memory management and performance."""
     face_swapper = get_face_swapper()
     if face_swapper is None:
-        update_status("Face swapper model not loaded or failed to load. Skipping swap.", NAME)
         return temp_frame
 
     # Safety check for faces

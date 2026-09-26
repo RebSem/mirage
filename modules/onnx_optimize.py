@@ -90,7 +90,9 @@ def optimize_for_coreml(model_path: str, input_shape: tuple = None) -> str:
     # had a (512, 512) matrix as its last initializer, keep it last.
     _preserve_emap_position(model, numpy_helper)
 
-    onnx.save(model, optimized_path)
+    tmp_path = f"{base}_coreml.tmp{ext}"
+    onnx.save(model, tmp_path)
+    os.replace(tmp_path, optimized_path)
     return optimized_path
 
 
