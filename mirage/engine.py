@@ -14,6 +14,7 @@ are safe to call from the UI thread.
 from __future__ import annotations
 
 import logging
+import sys
 import threading
 import time
 import traceback
@@ -57,9 +58,23 @@ def models_present() -> bool:
     return any(models_dir().glob("inswapper_128*.onnx"))
 
 
+class _Source:
+    """What the swapper needs from a source face: its identity embedding.
+
+    Avoids importing insightface on the UI thread just to wrap an array.
+    """
+
+    __slots__ = ("normed_embedding",)
+
+    def __init__(self, embedding: np.ndarray):
+        emb = np.asarray(embedding, dtype=np.float32).reshape(-1)
+        self.normed_embedding = emb / max(float(np.linalg.norm(emb)), 1e-6)
+
+
 class LiveEngine(QObject):
     stateChanged = Signal(str)
     modelsState = Signal(str)            # loading | ready | failed
+    qualityFallback = Signal(str)        # the engine had to drop to this quality preset
     previewReady = Signal()              # pull the frame with take_preview()
     statsChanged = Signal(dict)          # {"fps": float, "face_found": bool, "vcam": bool}
     notice = Signal(str, str, dict)      # level, i18n key, format args
@@ -146,12 +161,7 @@ class LiveEngine(QObject):
 
     def set_face(self, embedding: np.ndarray | None) -> None:
         """Swap to this identity (None = show the real face). Instant."""
-        if embedding is None:
-            self._source = None
-            return
-        from insightface.app.common import Face
-
-        self._source = Face(embedding=np.asarray(embedding, dtype=np.float32))
+        self._source = None if embedding is None else _Source(embedding)
 
     def apply(self, settings: Settings) -> None:
         import modules.globals as G
@@ -167,11 +177,12 @@ class LiveEngine(QObject):
         G.color_correction = False  # handled here, per frame
         self._color_fix = bool(settings.color_fix)
         quality = QUALITY.get(settings.quality, QUALITY["balanced"])
-        if quality.enhancer and self._enhancer_state in ("off", "failed"):
-            self._enhancer_state = "off"
-            if self._models_ready.is_set():
-                self._load_enhancer_async()
+        chose_best_now = quality.enhancer and not self._quality.enhancer
+        if chose_best_now and self._enhancer_state == "failed":
+            self._enhancer_state = "off"  # an explicit new choice of Best retries once
         self._quality = quality
+        if quality.enhancer and self._enhancer_state == "off" and self._models_ready.is_set():
+            self._load_enhancer_async()
 
     def _load_enhancer_async(self) -> None:
         if self._enhancer_state in ("loading", "ready"):
@@ -190,6 +201,8 @@ class LiveEngine(QObject):
                 log.exception("enhancer failed to load")
                 self._enhancer_state = "failed"
             if self._enhancer_state == "failed":
+                self._quality = QUALITY["balanced"]  # what the toast promises
+                self.qualityFallback.emit("balanced")
                 self.notice.emit("warn", "toast_enhancer_failed", {})
 
         threading.Thread(target=work, name="mirage-enhancer", daemon=True).start()
@@ -204,6 +217,42 @@ class LiveEngine(QObject):
         threading.Thread(target=self._start_worker, args=(camera,), name="mirage-start", daemon=True).start()
 
     def _start_worker(self, camera: CameraInfo) -> None:
+        try:
+            self._start(camera)
+        except Exception:
+            log.exception("starting live failed")
+            self.notice.emit("error", "toast_camera_failed", {})
+            if self._cap is None:
+                self._set_state(IDLE)
+
+    def _camera_allowed(self) -> bool:
+        """Ask macOS for camera access up front and wait for the answer.
+
+        OpenCV would fire the permission prompt and fail immediately, so the
+        first Start on a fresh install looked broken.
+        """
+        if sys.platform != "darwin":
+            return True
+        import AVFoundation as AVF
+
+        status = AVF.AVCaptureDevice.authorizationStatusForMediaType_(AVF.AVMediaTypeVideo)
+        if status == AVF.AVAuthorizationStatusAuthorized:
+            return True
+        if status != AVF.AVAuthorizationStatusNotDetermined:
+            return False  # denied or restricted: only System Settings can change it
+        answered, result = threading.Event(), {}
+
+        def handler(granted: bool) -> None:
+            result["granted"] = bool(granted)
+            answered.set()
+
+        AVF.AVCaptureDevice.requestAccessForMediaType_completionHandler_(AVF.AVMediaTypeVideo, handler)
+        while not answered.wait(0.2):
+            if self._stop.is_set():
+                return False
+        return result.get("granted", False)
+
+    def _start(self, camera: CameraInfo) -> None:
         if not self._models_ready.is_set() and not self._load_models_safe():
             self._set_state(IDLE)
             return
@@ -219,6 +268,11 @@ class LiveEngine(QObject):
 
             cap = DemoCapturer(camera.uid[len("demo:"):])
         else:
+            if not self._camera_allowed():
+                if not self._stop.is_set():
+                    self.notice.emit("error", "toast_camera_denied", {})
+                self._set_state(IDLE)
+                return
             from modules.video_capture import VideoCapturer
 
             cap = VideoCapturer(camera.index)

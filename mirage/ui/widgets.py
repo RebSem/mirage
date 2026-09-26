@@ -248,6 +248,7 @@ class IconButton(_Pressable):
         super().__init__(parent)
         self.icon = icon
         self.setToolTip(tooltip)
+        self.setAccessibleName(tooltip)
         self.setFixedSize(size, size)
 
     def paintEvent(self, _e) -> None:  # noqa: N802
@@ -443,6 +444,7 @@ class StatusPill(QWidget):
 
 
 def labeled_row(label: QLabel, control: QWidget, parent: QWidget | None = None) -> QWidget:
+    control.setAccessibleName(label.text())  # VoiceOver reads the row's label
     row = QWidget(parent)
     lay = QHBoxLayout(row)
     lay.setContentsMargins(0, 0, 0, 0)

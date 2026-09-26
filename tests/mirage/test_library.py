@@ -411,9 +411,23 @@ def test_corrupt_index_starts_empty(
         lib = FaceLibrary(root, embedder)
     assert lib.list() == []
     assert caplog.records
-    assert (root / "index.corrupt.json").read_text(encoding="utf-8") == content  # kept for recovery
+    backups = list(root.glob("index.corrupt-*.json"))
+    assert len(backups) == 1 and backups[0].read_text(encoding="utf-8") == content  # kept for recovery
     lib.add_image(make_image(), "Fresh start")
     assert len(FaceLibrary(root, embedder).list()) == 1
+
+
+def test_corrupt_index_recovers_faces_from_files(tmp_path: Path, embedder: FakeEmbedder) -> None:
+    root = tmp_path / "faces"
+    lib = FaceLibrary(root, embedder)
+    kept = lib.add_image(make_image(), "Keep me").id
+    (root / "index.json").write_text("{broken", encoding="utf-8")
+    recovered = FaceLibrary(root, embedder)
+    assert [e.id for e in recovered.list()] == [kept]
+    assert recovered.embedding(kept).shape == (512,)
+    (root / "index.json").write_text("{broken again", encoding="utf-8")
+    FaceLibrary(root, embedder)
+    assert len(list(root.glob("index.corrupt-*.json"))) == 2  # older backup not overwritten
 
 
 def test_index_cannot_point_outside_the_library(tmp_path: Path, embedder: FakeEmbedder) -> None:

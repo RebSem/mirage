@@ -100,6 +100,15 @@ EN: dict[str, str] = {
     "menu_about": "About Mirage",
     "about_text": "Mirage {version}\nA just-for-fun, macOS-native face swap built on Deep-Live-Cam.\nAGPL-3.0 · models: non-commercial use only.",
     "file_dialog_title": "Choose photos with faces",
+    "status_models_failed": "Models didn't load",
+    "vcam_not_receiving": "Nothing is reaching OBS Virtual Camera",
+    "toast_camera_denied": "Mirage isn't allowed to use the camera. Turn it on in System Settings → Privacy & Security → Camera.",
+    "toast_import_failed": "Couldn't add “{name}”. Details are in the log (Help → Show Logs).",
+    "toast_face_unreadable": "The saved data for “{name}” is damaged; showing your real face. Remove it and add the photo again.",
+    "remove_confirm_title": "Remove face?",
+    "remove_confirm_text": "“{name}” and its saved photo will be deleted from Mirage.",
+    "remove_confirm_live": "You're live with this face — the call will switch to your real face.",
+    "file_filter_images": "Images",
 }
 
 RU: dict[str, str] = {
@@ -187,6 +196,15 @@ RU: dict[str, str] = {
     "menu_about": "О Mirage",
     "about_text": "Mirage {version}\nЗамена лица на macOS — просто по фану, на базе Deep-Live-Cam.\nAGPL-3.0 · модели: только некоммерческое использование.",
     "file_dialog_title": "Выберите фото с лицами",
+    "status_models_failed": "Модели не загрузились",
+    "vcam_not_receiving": "В OBS Virtual Camera ничего не поступает",
+    "toast_camera_denied": "Mirage не разрешено пользоваться камерой. Включите в Системных настройках → Конфиденциальность и безопасность → Камера.",
+    "toast_import_failed": "Не удалось добавить «{name}». Подробности в логе (Справка → Показать логи).",
+    "toast_face_unreadable": "Сохранённые данные «{name}» повреждены; показываю ваше лицо. Удалите его и добавьте фото заново.",
+    "remove_confirm_title": "Удалить лицо?",
+    "remove_confirm_text": "«{name}» и сохранённое фото будут удалены из Mirage.",
+    "remove_confirm_live": "Вы в эфире с этим лицом — в звонке появится ваше настоящее лицо.",
+    "file_filter_images": "Изображения",
 }
 
 LANGUAGES = {"en": EN, "ru": RU}

@@ -47,6 +47,7 @@ THUMB_ZOOM = 1.8  # face box is enlarged this much before the square crop
 JPEG_QUALITY = 92
 NAME_MAX = 40
 DEFAULT_NAME = "Face"
+DETECT_MAX_SIDE = 2048
 
 _ID_RE = re.compile(r"[0-9a-f]{12}")
 _NAME_SEPARATORS = re.compile(r"[_\-.]+")
@@ -255,14 +256,22 @@ class FaceLibrary:
     def add_image(self, image: np.ndarray, name: str) -> FaceEntry:
         """Import a BGR (or gray/BGRA) uint8 image. Raises NoFaceError without a face."""
         image = _as_bgr(image)
+        # Detect on a capped copy: a 48 MP photo (plus padded retries) would
+        # otherwise allocate gigabytes. The box is mapped back afterwards.
+        scale = min(1.0, DETECT_MAX_SIDE / max(image.shape[:2]))
+        probe = image if scale >= 1.0 else cv2.resize(
+            image, (max(1, round(image.shape[1] * scale)), max(1, round(image.shape[0] * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
         with self._embed_lock:
-            face = self._embedder(image)
+            face = self._embedder(probe)
         if face is None:
             raise NoFaceError("no face found in the image")
         embedding = _as_embedding(face.embedding)
 
         # All the heavy work happens outside the lock so readers never wait on it.
-        stored, bbox = _fit(image, tuple(face.bbox))
+        bbox_full = tuple(float(v) / scale for v in face.bbox)
+        stored, bbox = _fit(image, bbox_full)
         image_jpg = _encode_jpeg(stored)
         thumb_jpg = _encode_jpeg(_thumbnail(stored, bbox))
         embedding_npy = _encode_npy(embedding)
@@ -387,15 +396,21 @@ class FaceLibrary:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
+            self._rebuild_from_files()  # e.g. the index was deleted by hand
             return
-        except (OSError, ValueError) as exc:
-            log.warning("Face library index %s is unreadable, starting empty: %s", path, exc)
+        except ValueError as exc:
+            log.warning("Face library index %s is corrupt, rebuilding from files: %s", path, exc)
             self._set_index_aside()
+            self._rebuild_from_files()
+            return
+        except OSError as exc:  # unreadable right now (permissions…): leave everything as is
+            log.warning("Face library index %s can't be read: %s", path, exc)
             return
         faces = data.get("faces") if isinstance(data, dict) else None
         if not isinstance(faces, list):
-            log.warning("Face library index %s has no face list, starting empty", path)
+            log.warning("Face library index %s has no face list, rebuilding from files", path)
             self._set_index_aside()
+            self._rebuild_from_files()
             return
         version = data.get("version")
         if version != INDEX_VERSION:
@@ -416,9 +431,37 @@ class FaceLibrary:
                 log.warning("Could not rewrite face library index: %s", exc)
 
     def _set_index_aside(self) -> None:
-        """Keep an unusable index as index.corrupt.json rather than overwrite it on the next add."""
+        """Keep an unusable index as index.corrupt-<time>.json; never overwrite an older copy."""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        target = self.root / f"index.corrupt-{stamp}.json"
+        n = 1
+        while target.exists():
+            n += 1
+            target = self.root / f"index.corrupt-{stamp}-{n}.json"
         with contextlib.suppress(OSError):
-            self._index_path.replace(self.root / "index.corrupt.json")
+            self._index_path.replace(target)
+
+    def _rebuild_from_files(self) -> None:
+        """Recover faces whose three files (<id>.jpg, <id>_thumb.jpg, <id>.npy) are all present."""
+        found = []
+        for npy in self.root.glob("*.npy"):
+            face_id = npy.stem
+            if not _ID_RE.fullmatch(face_id):
+                continue
+            if (self.root / f"{face_id}.jpg").is_file() and (self.root / f"{face_id}_thumb.jpg").is_file():
+                found.append((npy.stat().st_mtime, face_id))
+        if not found:
+            return
+        for created, face_id in sorted(found):
+            self._entries.append(FaceEntry(
+                id=face_id, name=DEFAULT_NAME, created=created,
+                image=f"{face_id}.jpg", thumb=f"{face_id}_thumb.jpg", embedding=f"{face_id}.npy",
+            ))
+        log.warning("Recovered %d face(s) from files; their names were reset", len(found))
+        try:
+            self._write_index()
+        except OSError as exc:
+            log.warning("Could not write the rebuilt face library index: %s", exc)
 
     def _parse_entry(self, item: object) -> FaceEntry | None:
         if not isinstance(item, dict):

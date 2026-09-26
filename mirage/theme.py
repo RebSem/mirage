@@ -20,6 +20,7 @@ READY = QColor("#32D74B")             # system green (dark)
 WARN = QColor("#FFD60A")
 STAGE_BG = QColor(10, 10, 16, 235)
 FALLBACK_GLASS = QColor(255, 255, 255, 26)   # used when native glass is unavailable
+FALLBACK_WINDOW = QColor("#17161F")          # opaque window background without native glass
 FALLBACK_EDGE = QColor(255, 255, 255, 46)
 
 # ── geometry ─────────────────────────────────────────────────────────────
@@ -36,10 +37,24 @@ TRAFFIC_LIGHTS_SPACE = 70
 TITLEBAR_HEIGHT = 32
 
 # ── motion (see docs/DESIGN.md) ──────────────────────────────────────────
-PRESS_MS = 120        # button press feedback
-SWITCH_MS = 160       # toggles, segmented highlight
-TOAST_IN_MS = 220
+
+
+def reduce_motion() -> bool:
+    """macOS Accessibility → Display → Reduce motion."""
+    try:
+        import AppKit
+
+        return bool(AppKit.NSWorkspace.sharedWorkspace().accessibilityDisplayShouldReduceMotion())
+    except Exception:
+        return False
+
+
+_STILL = reduce_motion()
+PRESS_MS = 0 if _STILL else 120        # button press feedback
+SWITCH_MS = 0 if _STILL else 160       # toggles, segmented highlight
+TOAST_IN_MS = 220                      # toasts only fade when motion is reduced
 TOAST_OUT_MS = 160
+TOAST_SLIDE_PX = 0 if _STILL else 8
 
 
 def font(size: float, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
