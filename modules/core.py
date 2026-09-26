@@ -333,10 +333,16 @@ def start() -> None:
 
 
 def destroy(to_quit=True) -> None:
+    if not modules.globals.headless:
+        ui.stop_live_threads()
     if modules.globals.target_path:
         clean_temp(modules.globals.target_path)
     if to_quit:
-        quit()
+        app = None if modules.globals.headless else ui.QApplication.instance()
+        if app is not None:
+            app.quit()  # returns from exec() normally; no SystemExit inside a Qt slot
+        else:
+            quit()
 
 
 def run() -> None:

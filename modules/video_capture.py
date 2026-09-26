@@ -98,6 +98,8 @@ class VideoCapturer:
             reported_fps = self.cap.get(cv2.CAP_PROP_FPS)
             self.actual_fps = self._measure_fps(warmup=10, sample=30,
                                                 fallback=reported_fps or fps)
+            if self.actual_fps is None:
+                raise RuntimeError("Camera opened but delivers no frames")
 
             print(f"[VideoCapturer] {self.actual_width}x{self.actual_height} "
                   f"@ {self.actual_fps:.1f}fps (reported={reported_fps:.0f})",
@@ -141,15 +143,23 @@ class VideoCapturer:
         number for adaptive polling/detection intervals.
         """
         try:
-            for _ in range(warmup):
-                self.cap.read()
+            # Failed reads block ~1s each on macOS; allow a slow start, but
+            # report a camera that never delivers a frame.
+            deadline = time.monotonic() + 5.0
+            good = 0
+            while good < warmup and time.monotonic() < deadline:
+                if self.cap.read()[0]:
+                    good += 1
+            if good == 0:
+                return None
             t0 = time.perf_counter()
-            for _ in range(sample):
-                ret, _ = self.cap.read()
-                if not ret:
-                    return fallback
+            got = 0
+            sample_deadline = time.monotonic() + 5.0
+            while got < sample and time.monotonic() < sample_deadline:
+                if self.cap.read()[0]:
+                    got += 1
             elapsed = time.perf_counter() - t0
-            if elapsed <= 0:
+            if got < sample or elapsed <= 0:
                 return fallback
             return sample / elapsed
         except Exception:

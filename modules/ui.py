@@ -10,6 +10,7 @@ Public API kept stable for the rest of the codebase:
 
 from __future__ import annotations
 
+import importlib
 import os
 import platform
 import queue
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+import traceback
 import webbrowser
 from typing import Callable, List, Optional, Tuple
 
@@ -63,12 +65,14 @@ from modules.face_analyser import (
     get_unique_faces_from_target_image,
     get_unique_faces_from_target_video,
     has_valid_map,
+    load_source_face,
     reset_face_analyser,
     simplify_maps,
 )
 from modules.gettext import LanguageManager
 from modules.gpu_processing import gpu_cvt_color, gpu_flip, gpu_resize
 from modules.processors.frame.core import get_frame_processors_modules
+from modules import virtualcam_out
 from modules.utilities import (
     has_image_extension,
     is_image,
@@ -397,11 +401,9 @@ def _emit_status(text: str) -> None:
 
 def update_status(text: str) -> None:
     """Thread-safe status update — uses signal if called off-UI thread."""
+    # No processEvents() here: pumping events from inside model loading let a
+    # second Live click re-enter get_face_swapper() while it held its lock.
     _emit_status(_(text))
-    if _APP is not None and QThread.currentThread() is _APP.thread():
-        # On UI thread — flush events so the user sees the update during
-        # long synchronous start() runs.
-        _APP.processEvents()
 
 
 def check_and_ignore_nsfw(target, destroy: Optional[Callable] = None) -> bool:
@@ -438,6 +440,9 @@ def get_available_cameras() -> Tuple[List[int], List[str]]:
             return [], ["No cameras found"]
 
     if platform.system() == "Darwin":
+        cams = _darwin_cameras()
+        if cams:
+            return [i for i, _n, _u in cams], [n for _i, n, _u in cams]
         return [0, 1], ["Camera 0", "Camera 1"]
 
     # Linux probe
@@ -450,6 +455,55 @@ def get_available_cameras() -> Tuple[List[int], List[str]]:
             names.append(f"Camera {i}")
             cap.release()
     return (indices, names) if names else ([], ["No cameras found"])
+
+
+def _darwin_cameras() -> List[Tuple[int, str, str]]:
+    """(OpenCV index, name, uniqueID) for macOS cameras, built-in camera first.
+
+    OpenCV's AVFoundation backend opens ``index`` in the list of video + muxed
+    devices sorted by uniqueID, so indices are computed from that exact list
+    (they shift when e.g. an iPhone Continuity Camera comes and goes).
+    OBS Virtual Camera is hidden: live frames are sent into it, so capturing
+    from it would loop our own output.
+    """
+    try:
+        import AVFoundation as AVF
+        devices = list(AVF.AVCaptureDevice.devicesWithMediaType_(AVF.AVMediaTypeVideo))
+        devices += list(AVF.AVCaptureDevice.devicesWithMediaType_(AVF.AVMediaTypeMuxed))
+        devices.sort(key=lambda d: str(d.uniqueID()))
+        cams = [
+            (i, str(d.localizedName()), str(d.uniqueID()), str(d.deviceType()))
+            for i, d in enumerate(devices)
+            if "OBS Virtual Camera" not in str(d.localizedName())
+        ]
+        cams.sort(key=lambda c: c[3] != str(AVF.AVCaptureDeviceTypeBuiltInWideAngleCamera))
+        return [(i, name, uid) for i, name, uid, _t in cams]
+    except Exception as exc:
+        print(f"Error detecting cameras: {exc}")
+        return []
+
+
+def _camera_entries() -> List[Tuple[int, str, Optional[str]]]:
+    if platform.system() == "Darwin":
+        cams = _darwin_cameras()
+        if cams:
+            return cams
+    indices, names = get_available_cameras()
+    if not indices:
+        return []
+    return [(i, n, None) for i, n in zip(indices, names)]
+
+
+class _RefreshingComboBox(QComboBox):
+    """Re-reads the device list each time the dropdown opens."""
+
+    def __init__(self, on_popup: Callable[[], None]):
+        super().__init__()
+        self._on_popup = on_popup
+
+    def showPopup(self) -> None:
+        self._on_popup()
+        super().showPopup()
 
 
 # ─── main window ─────────────────────────────────────────────────────────
@@ -489,11 +543,20 @@ class _Switch(QWidget):
 
 
 class MainWindow(QMainWindow):
+    # Results of background work, delivered on the UI thread.
+    _liveModelsLoaded = Signal(object)
+    _randomFaceFetched = Signal(object)
+
     def __init__(self, start_cb: Callable, destroy_cb: Callable):
         super().__init__()
         load_switch_states()
         self._start_cb = start_cb
         self._destroy_cb = destroy_cb
+        self._live_busy = False
+        self._random_busy = False
+        self._last_random_face: Optional[str] = None
+        self._liveModelsLoaded.connect(self._on_live_models_loaded)
+        self._randomFaceFetched.connect(self._on_random_face_fetched)
 
         self.setWindowTitle(
             f"{modules.metadata.name} {modules.metadata.version} {modules.metadata.edition}"
@@ -731,16 +794,11 @@ class MainWindow(QMainWindow):
 
         # Row 0: camera selector + Live button
         grid.addWidget(QLabel(_("Select Camera:")), 0, 0)
-        self._camera_indices, self._camera_names = get_available_cameras()
+        self._camera_entries: List[Tuple[int, str, Optional[str]]] = []
 
-        self.cb_camera = QComboBox()
-        if not self._camera_names or self._camera_names[0] == "No cameras found":
-            self.cb_camera.addItem("No cameras found")
-            self.cb_camera.setEnabled(False)
-            cam_ok = False
-        else:
-            self.cb_camera.addItems(self._camera_names)
-            cam_ok = True
+        self.cb_camera = _RefreshingComboBox(self._refresh_cameras)
+        self._refresh_cameras()
+        cam_ok = bool(self._camera_entries)
         self.cb_camera.setToolTip(_("Select which camera to use for live mode"))
         grid.addWidget(self.cb_camera, 0, 1)
 
@@ -803,6 +861,48 @@ class MainWindow(QMainWindow):
 
         grid.setColumnStretch(1, 1)
         return card
+
+    def _refresh_cameras(self) -> None:
+        current = self.cb_camera.currentIndex()
+        prev_uid = (
+            self._camera_entries[current][2]
+            if 0 <= current < len(self._camera_entries) else None
+        )
+        entries = _camera_entries()
+        self._camera_entries = entries
+        self._camera_indices = [i for i, _n, _u in entries]
+        self._camera_names = [n for _i, n, _u in entries]
+        self.cb_camera.blockSignals(True)
+        self.cb_camera.clear()
+        if entries:
+            self.cb_camera.addItems(self._camera_names)
+            uids = [u for _i, _n, u in entries]
+            if prev_uid is not None and prev_uid in uids:
+                self.cb_camera.setCurrentIndex(uids.index(prev_uid))
+            elif prev_uid is None and 0 <= current < len(entries):
+                self.cb_camera.setCurrentIndex(current)
+            self.cb_camera.setEnabled(True)
+        else:
+            self.cb_camera.addItem("No cameras found")
+            self.cb_camera.setEnabled(False)
+        self.cb_camera.blockSignals(False)
+        if hasattr(self, "btn_live"):
+            self.btn_live.setEnabled(bool(entries))
+
+    def _selected_camera(self) -> Optional[Tuple[int, Optional[str]]]:
+        """(OpenCV index, uid) of the selected camera, resolved right now."""
+        idx = self.cb_camera.currentIndex()
+        if idx < 0 or idx >= len(self._camera_entries):
+            return None
+        index, _name, uid = self._camera_entries[idx]
+        if uid is None:
+            return index, None
+        for fresh_index, _n, fresh_uid in _camera_entries():
+            if fresh_uid == uid:
+                return fresh_index, uid
+        self._refresh_cameras()
+        update_status("Camera not found, the list was refreshed")
+        return None
 
     def _on_resolution_change(self, idx: int) -> None:
         if 0 <= idx < len(self._resolution_options):
@@ -885,21 +985,51 @@ class MainWindow(QMainWindow):
     def _on_random_face(self) -> None:
         if _PREVIEW is not None:
             _PREVIEW.hide()
-        try:
-            response = requests.get(
-                "https://thispersondoesnotexist.com/",
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=10,
-            )
-            response.raise_for_status()
-            temp_path = os.path.join(tempfile.gettempdir(), "deep_live_cam_random_face.jpg")
-            with open(temp_path, "wb") as f:
-                f.write(response.content)
-            modules.globals.source_path = temp_path
-            self.source_label.setPixmap(render_image_preview(temp_path, (200, 200)))
-            self.source_label.setText("")
-        except Exception as exc:
-            print(f"Failed to fetch random face: {exc}")
+        if self._random_busy:
+            return
+        self._random_busy = True
+        update_status("Downloading a random face...")
+
+        def work() -> None:
+            path, error = None, None
+            try:
+                # The site root is an HTML page now; the photo lives here.
+                response = requests.get(
+                    f"https://thispersondoesnotexist.com/random-person.jpeg?{time.time_ns()}",
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=15,
+                )
+                response.raise_for_status()
+                if cv2.imdecode(np.frombuffer(response.content, np.uint8), cv2.IMREAD_COLOR) is None:
+                    raise ValueError("response is not an image")
+                # Unique name so the live worker notices the change.
+                fd, path = tempfile.mkstemp(prefix="deep_live_cam_random_face_", suffix=".jpg")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(response.content)
+            except Exception as exc:
+                error = str(exc)
+            self._randomFaceFetched.emit((path, error))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_random_face_fetched(self, result) -> None:
+        path, error = result
+        self._random_busy = False
+        if error or not path:
+            print(f"Failed to fetch random face: {error}")
+            update_status("Failed to fetch random face")
+            return
+        previous = self._last_random_face
+        self._last_random_face = path
+        modules.globals.source_path = path
+        self.source_label.setPixmap(render_image_preview(path, (200, 200)))
+        self.source_label.setText("")
+        update_status("Random face loaded")
+        if previous and previous not in (path, modules.globals.source_path, modules.globals.target_path):
+            try:
+                os.remove(previous)
+            except OSError:
+                pass
 
     def _on_swap_paths(self) -> None:
         global _RECENT_SOURCE_DIR, _RECENT_TARGET_DIR
@@ -935,6 +1065,8 @@ class MainWindow(QMainWindow):
         selected = key_map.get(choice)
         if selected:
             _update_tumbler(selected, True)
+            _ENHANCER_FAILED.discard(selected)  # explicit re-selection retries a failed load
+            _preload_enhancer(selected)
         save_switch_states()
 
     def _on_transparency_change(self, value: float) -> None:
@@ -1018,30 +1150,79 @@ class MainWindow(QMainWindow):
             _PREVIEW.show()
 
     def _on_live(self) -> None:
-        idx = self.cb_camera.currentIndex()
-        if idx < 0 or idx >= len(self._camera_indices):
-            update_status("No camera available")
+        if self._live_busy:
             return
-        camera_index = self._camera_indices[idx]
+        camera = self._selected_camera()
+        if camera is None:
+            if not self._camera_entries:
+                update_status("No camera available")
+            return
+        camera_index, camera_uid = camera
         if _LIVE_MAPPER is not None and _LIVE_MAPPER.isVisible():
             update_status("Source x Target Mapper is already open.")
             _LIVE_MAPPER.raise_()
             return
-        if not modules.globals.map_faces:
-            if modules.globals.source_path is None:
-                update_status("Please select a source image first")
-                return
-            from modules.face_analyser import get_face_analyser
-            from modules.processors.frame.face_swapper import get_face_swapper
-            get_face_analyser()
-            get_face_swapper()
-            _open_webcam_preview(camera_index)
-        else:
+        if modules.globals.map_faces:
             modules.globals.source_target_map = []
-            _open_live_mapper_dialog(camera_index, modules.globals.source_target_map)
+            _open_live_mapper_dialog(camera_index, modules.globals.source_target_map, camera_uid)
+            return
+        if modules.globals.source_path is None:
+            update_status("Please select a source image first")
+            return
+        running = _WEBCAM_PREVIEW
+        if running is not None and camera_uid is not None and running.camera_uid is not None:
+            same_camera = running.camera_uid == camera_uid
+        else:
+            same_camera = running is not None and running.camera_index == camera_index
+        if running is not None and running.isVisible() and same_camera:
+            # Source, enhancer and sliders already apply live; restarting
+            # would drop the camera and Zoom's video.
+            running.showNormal()
+            running.raise_()
+            running.activateWindow()
+            update_status("Live is already running, changes apply immediately")
+            return
+
+        self._live_busy = True
+        self.btn_live.setEnabled(False)
+        update_status("Loading models...")
+        source_path = modules.globals.source_path
+
+        def work() -> None:
+            error = None
+            try:
+                from modules.face_analyser import get_face_analyser
+                from modules.processors.frame import face_swapper
+                get_face_analyser()
+                face_swapper.FACE_SWAPPER_LOAD_FAILED = False  # explicit Live press retries
+                if face_swapper.get_face_swapper() is None:
+                    error = "Face swapper model failed to load"
+                elif load_source_face(modules.globals.source_path or source_path) is None:
+                    error = "No face found in source image"
+            except Exception as exc:
+                traceback.print_exc()
+                error = f"Failed to load models: {exc}"
+            self._liveModelsLoaded.emit(error)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_live_models_loaded(self, error) -> None:
+        self._live_busy = False
+        self.btn_live.setEnabled(bool(self._camera_entries))
+        if error:
+            update_status(error)
+            return
+        camera = self._selected_camera()
+        if camera is None:
+            return
+        for key in _ENHANCERS:
+            if modules.globals.fp_ui.get(key, False):
+                _ENHANCER_FAILED.discard(key)  # explicit Live press retries
+                _preload_enhancer(key)
+        _open_webcam_preview(*camera)
 
     def closeEvent(self, event):
-        # Treat OS-level close as Destroy click
+        # Treat OS-level close as Destroy click (stops live threads, then quits).
         self._destroy_cb()
         event.accept()
 
@@ -1114,6 +1295,10 @@ class PreviewWindow(QWidget):
 class _CaptureWorker(QThread):
     """Reads frames from the camera into a bounded queue. Drops on overflow."""
 
+    # On macOS a read fails for a moment when another app reconfigures the
+    # camera; only end the session if frames stay away this long.
+    FAILURE_GRACE_SECONDS = 5.0
+
     def __init__(self, cap, capture_queue: queue.Queue, stop_event: threading.Event):
         super().__init__()
         self._cap = cap
@@ -1121,11 +1306,23 @@ class _CaptureWorker(QThread):
         self._stop = stop_event
 
     def run(self) -> None:
+        failing_since = None
         while not self._stop.is_set():
-            ret, frame = self._cap.read()
-            if not ret:
-                self._stop.set()
-                break
+            try:
+                ret, frame = self._cap.read()
+            except Exception as exc:
+                print(f"[webcam] read error: {exc}")
+                ret, frame = False, None
+            if not ret or frame is None:
+                now = time.monotonic()
+                failing_since = failing_since or now
+                if now - failing_since >= self.FAILURE_GRACE_SECONDS:
+                    update_status("Camera stopped sending frames")
+                    self._stop.set()
+                    break
+                time.sleep(0.05)
+                continue
+            failing_since = None
             try:
                 self._queue.put_nowait(frame)
             except queue.Full:
@@ -1139,20 +1336,118 @@ class _CaptureWorker(QThread):
                     pass
 
 
+# Face enhancers: fp_ui key -> (module, loaded-model global, loader function).
+_ENHANCERS = {
+    "face_enhancer": ("modules.processors.frame.face_enhancer", "FACE_ENHANCER", "get_face_enhancer"),
+    "face_enhancer_gpen256": ("modules.processors.frame.face_enhancer_gpen256", "ENHANCER", "get_enhancer"),
+    "face_enhancer_gpen512": ("modules.processors.frame.face_enhancer_gpen512", "ENHANCER", "get_enhancer"),
+}
+_ENHANCER_BY_NAME = {
+    "DLC.FACE-ENHANCER": "face_enhancer",
+    "DLC.FACE-ENHANCER-GPEN256": "face_enhancer_gpen256",
+    "DLC.FACE-ENHANCER-GPEN512": "face_enhancer_gpen512",
+}
+_ENHANCER_LOADING: set = set()
+_ENHANCER_FAILED: set = set()
+_ENHANCER_STATE_LOCK = threading.Lock()
+
+
+def _enhancer_ready(key: str) -> bool:
+    """Model loaded and, if we're loading it, warmed up too."""
+    if key in _ENHANCER_LOADING:
+        return False
+    module_name, model_attr, _loader = _ENHANCERS[key]
+    module = sys.modules.get(module_name)
+    return module is not None and getattr(module, model_attr, None) is not None
+
+
+def _preload_enhancer(key: str) -> None:
+    """Load an enhancer model off the live thread.
+
+    GFPGAN/GPEN take many seconds to load (GPEN may even download); doing
+    that inside the processing thread froze the video, and a load error
+    killed the thread.
+    """
+    with _ENHANCER_STATE_LOCK:
+        if key in _ENHANCER_LOADING or key in _ENHANCER_FAILED or _enhancer_ready(key):
+            return
+        _ENHANCER_LOADING.add(key)
+
+    def work() -> None:
+        module_name, model_attr, loader = _ENHANCERS[key]
+        try:
+            update_status("Loading face enhancer model...")
+            module = importlib.import_module(module_name)
+            getattr(module, loader)()
+            session = getattr(module, model_attr, None)
+            if session is None:
+                raise RuntimeError("model did not load")
+            if key == "face_enhancer":
+                # GPEN warms up in its loader; GFPGAN doesn't, and its first
+                # CoreML run otherwise stalls the live thread for seconds.
+                from modules.processors.frame._onnx_enhancer import warmup_session
+                warmup_session(session)
+            update_status("Face enhancer ready")
+        except Exception as exc:
+            print(f"[{key}] failed to load: {exc}")
+            with _ENHANCER_STATE_LOCK:
+                _ENHANCER_FAILED.add(key)
+            update_status("Face enhancer failed to load")
+        finally:
+            with _ENHANCER_STATE_LOCK:
+                _ENHANCER_LOADING.discard(key)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _enhancer_usable(key: str) -> bool:
+    """True if the enhancer is switched on and its model is already loaded."""
+    if not modules.globals.fp_ui.get(key, False):
+        return False
+    if _enhancer_ready(key):
+        return True
+    _preload_enhancer(key)
+    return False
+
+
+def _source_key(path: Optional[str]):
+    """Identity of the source photo: path plus mtime, so a rewritten file reloads."""
+    if not path:
+        return None
+    try:
+        return path, os.path.getmtime(path)
+    except OSError:
+        return path, None
+
+
 class _ProcessingWorker(QThread):
     """Pulls raw frames, runs detect/swap/enhance, pushes processed frames."""
 
-    def __init__(self, capture_queue, processed_queue, stop_event, camera_fps: float):
+    def __init__(self, capture_queue, processed_queue, stop_event, camera_fps: float, generation: int = 0):
         super().__init__()
         self._cq = capture_queue
         self._pq = processed_queue
         self._stop = stop_event
         self._fps = camera_fps
+        self._generation = generation
 
     def run(self) -> None:
+        try:
+            self._loop()
+        except BaseException:  # incl. SystemExit from processor loading
+            traceback.print_exc()
+            update_status("Live processing stopped because of an error")
+            self._stop.set()
+        finally:
+            # A worker that outlived its window must not close the camera
+            # a newer live session is already streaming to.
+            if self._generation == _LIVE_GENERATION:
+                virtualcam_out.close()
+
+    def _loop(self) -> None:
         frame_processors = get_frame_processors_modules(modules.globals.frame_processors)
         source_image = None
-        last_source_path = None
+        source_key = None
         prev_time = time.time()
         fps_update_interval = 0.5
         frame_count = 0
@@ -1160,7 +1455,9 @@ class _ProcessingWorker(QThread):
         det_count = 0
         cached_target_face = None
         cached_many_faces = None
+        last_shape = None
         det_interval = max(1, round(self._fps * 0.08))
+        logged_errors: set = set()
 
         while not self._stop.is_set():
             try:
@@ -1168,88 +1465,98 @@ class _ProcessingWorker(QThread):
             except queue.Empty:
                 continue
 
-            temp_frame = frame
-            if modules.globals.live_mirror:
-                temp_frame = gpu_flip(temp_frame, 1)
+            try:
+                temp_frame = frame
+                if modules.globals.live_mirror:
+                    temp_frame = gpu_flip(temp_frame, 1)
 
-            if not modules.globals.map_faces:
-                if (
-                    modules.globals.source_path
-                    and modules.globals.source_path != last_source_path
-                ):
-                    last_source_path = modules.globals.source_path
-                    source_image = get_one_face(imread_unicode(modules.globals.source_path))
+                if not modules.globals.map_faces:
+                    path = modules.globals.source_path
+                    key = _source_key(path)
+                    if key != source_key:
+                        source_key = key
+                        if path:
+                            new_face = load_source_face(path)
+                            if new_face is not None:
+                                source_image = new_face
+                            else:
+                                # Keep swapping with the previous face.
+                                update_status("No face found in source image")
+                        else:
+                            source_image = None
 
-                det_count += 1
-                if det_count % det_interval == 0:
-                    if modules.globals.many_faces:
-                        cached_target_face = None
-                        cached_many_faces = detect_many_faces_fast(temp_frame)
-                    else:
-                        cached_target_face = detect_one_face_fast(temp_frame)
-                        cached_many_faces = None
+                    # A camera format switch (640x480 <-> 640x360) makes the
+                    # cached box point at the wrong place: detect right away.
+                    force_detect = temp_frame.shape != last_shape
+                    last_shape = temp_frame.shape
+                    det_count += 1
+                    if force_detect or det_count % det_interval == 0:
+                        if modules.globals.many_faces:
+                            cached_target_face = None
+                            cached_many_faces = detect_many_faces_fast(temp_frame)
+                        else:
+                            cached_target_face = detect_one_face_fast(temp_frame)
+                            cached_many_faces = None
 
-                cached_faces = None
-                if cached_many_faces:
-                    cached_faces = cached_many_faces
-                elif cached_target_face is not None:
-                    cached_faces = [cached_target_face]
+                    cached_faces = None
+                    if cached_many_faces:
+                        cached_faces = cached_many_faces
+                    elif cached_target_face is not None:
+                        cached_faces = [cached_target_face]
 
-                # Fast detection skips the 2d106 landmark model, but the mouth
-                # mask needs it. Attach landmarks on demand (computed once per
-                # detection cycle — the helper no-ops if already present).
-                if modules.globals.mouth_mask and cached_faces:
-                    ensure_landmarks(temp_frame, cached_faces)
+                    # Fast detection skips the 2d106 landmark model, but the mouth
+                    # mask needs it. Attach landmarks on demand (computed once per
+                    # detection cycle — the helper no-ops if already present).
+                    if modules.globals.mouth_mask and cached_faces:
+                        ensure_landmarks(temp_frame, cached_faces)
 
-                for fp in frame_processors:
-                    if fp.NAME == "DLC.FACE-ENHANCER":
-                        if modules.globals.fp_ui["face_enhancer"]:
-                            temp_frame = fp.process_frame(
-                                None, temp_frame, detected_faces=cached_faces
-                            )
-                    elif fp.NAME == "DLC.FACE-ENHANCER-GPEN256":
-                        if modules.globals.fp_ui.get("face_enhancer_gpen256", False):
-                            temp_frame = fp.process_frame(
-                                None, temp_frame, detected_faces=cached_faces
-                            )
-                    elif fp.NAME == "DLC.FACE-ENHANCER-GPEN512":
-                        if modules.globals.fp_ui.get("face_enhancer_gpen512", False):
-                            temp_frame = fp.process_frame(
-                                None, temp_frame, detected_faces=cached_faces
-                            )
-                    elif fp.NAME == "DLC.FACE-SWAPPER":
-                        swapped_bboxes = []
-                        if modules.globals.many_faces and cached_many_faces:
-                            result = temp_frame.copy()
-                            for t_face in cached_many_faces:
-                                result = fp.swap_face(source_image, t_face, result)
-                                if hasattr(t_face, "bbox") and t_face.bbox is not None:
-                                    swapped_bboxes.append(t_face.bbox.astype(int))
-                            temp_frame = result
-                        elif cached_target_face is not None:
-                            temp_frame = fp.swap_face(
-                                source_image, cached_target_face, temp_frame
-                            )
-                            if (
-                                hasattr(cached_target_face, "bbox")
-                                and cached_target_face.bbox is not None
-                            ):
-                                swapped_bboxes.append(cached_target_face.bbox.astype(int))
-                        temp_frame = fp.apply_post_processing(temp_frame, swapped_bboxes)
-                    else:
-                        temp_frame = fp.process_frame(source_image, temp_frame)
-            else:
-                modules.globals.target_path = None
-                for fp in frame_processors:
-                    if fp.NAME == "DLC.FACE-ENHANCER":
-                        if modules.globals.fp_ui["face_enhancer"]:
+                    # Snapshot: the UI thread adds/removes enhancers in this list.
+                    for fp in list(frame_processors):
+                        enhancer_key = _ENHANCER_BY_NAME.get(fp.NAME)
+                        if enhancer_key is not None:
+                            if _enhancer_usable(enhancer_key):
+                                temp_frame = fp.process_frame(
+                                    None, temp_frame, detected_faces=cached_faces
+                                )
+                        elif fp.NAME == "DLC.FACE-SWAPPER":
+                            swapped_bboxes = []
+                            if modules.globals.many_faces and cached_many_faces:
+                                result = temp_frame.copy()
+                                for t_face in cached_many_faces:
+                                    result = fp.swap_face(source_image, t_face, result)
+                                    if hasattr(t_face, "bbox") and t_face.bbox is not None:
+                                        swapped_bboxes.append(t_face.bbox.astype(int))
+                                temp_frame = result
+                            elif cached_target_face is not None:
+                                temp_frame = fp.swap_face(
+                                    source_image, cached_target_face, temp_frame
+                                )
+                                if (
+                                    hasattr(cached_target_face, "bbox")
+                                    and cached_target_face.bbox is not None
+                                ):
+                                    swapped_bboxes.append(cached_target_face.bbox.astype(int))
+                            temp_frame = fp.apply_post_processing(temp_frame, swapped_bboxes)
+                        else:
+                            temp_frame = fp.process_frame(source_image, temp_frame)
+                else:
+                    modules.globals.target_path = None
+                    for fp in list(frame_processors):
+                        enhancer_key = _ENHANCER_BY_NAME.get(fp.NAME)
+                        if enhancer_key is not None:
+                            if _enhancer_usable(enhancer_key):
+                                temp_frame = fp.process_frame_v2(temp_frame)
+                        else:
                             temp_frame = fp.process_frame_v2(temp_frame)
-                    elif fp.NAME in ("DLC.FACE-ENHANCER-GPEN256", "DLC.FACE-ENHANCER-GPEN512"):
-                        fp_key = fp.NAME.split(".")[-1].lower().replace("-", "_")
-                        if modules.globals.fp_ui.get(fp_key, False):
-                            temp_frame = fp.process_frame_v2(temp_frame)
-                    else:
-                        temp_frame = fp.process_frame_v2(temp_frame)
+            except Exception as exc:
+                # One bad frame must not kill the thread (that froze the video
+                # for good); show the camera frame and keep going.
+                error_kind = f"{type(exc).__name__}: {exc}"[:200]
+                if error_kind not in logged_errors:
+                    logged_errors.add(error_kind)
+                    traceback.print_exc()
+                    update_status("Frame processing error, showing camera frame")
+                temp_frame = gpu_flip(frame, 1) if modules.globals.live_mirror else frame
 
             current_time = time.time()
             frame_count += 1
@@ -1257,6 +1564,11 @@ class _ProcessingWorker(QThread):
                 fps = frame_count / (current_time - prev_time)
                 frame_count = 0
                 prev_time = current_time
+
+            # Straight to OBS Virtual Camera (before the FPS overlay), so
+            # Zoom keeps getting video while the preview window is hidden.
+            if not self._stop.is_set():
+                virtualcam_out.send(temp_frame)
 
             if modules.globals.show_fps:
                 cv2.putText(
@@ -1277,9 +1589,29 @@ class _ProcessingWorker(QThread):
                     pass
 
 
+# Live threads that outlived their window's wait(); kept referenced so no
+# running QThread is ever destroyed (that aborts the whole app).
+_PENDING_WORKERS: List[QThread] = []
+_LIVE_GENERATION = 0
+
+
+def _keep_until_finished(worker: QThread) -> None:
+    _PENDING_WORKERS[:] = [w for w in _PENDING_WORKERS if not w.isFinished()]
+    _PENDING_WORKERS.append(worker)
+
+
 class WebcamPreviewWindow(QWidget):
-    def __init__(self, camera_index: int):
+    def __init__(self, camera_index: int, camera_uid: Optional[str] = None):
         super().__init__()
+        self.camera_index = camera_index
+        self.camera_uid = camera_uid
+        self.started = False
+        self._stop_event = threading.Event()
+        self._capture_worker: Optional[_CaptureWorker] = None
+        self._processing_worker: Optional[_ProcessingWorker] = None
+        self._timer: Optional[QTimer] = None
+        self._shut_down = False
+
         self.setWindowTitle("Live Preview")
         self.resize(PREVIEW_DEFAULT_WIDTH, PREVIEW_DEFAULT_HEIGHT)
         layout = QVBoxLayout(self)
@@ -1293,7 +1625,6 @@ class WebcamPreviewWindow(QWidget):
         req_w, req_h = modules.globals.capture_resolution
         if not self._cap.start(req_w, req_h, 60):
             update_status("Failed to start camera")
-            QTimer.singleShot(0, self.close)
             return
 
         camera_fps = self._cap.actual_fps
@@ -1304,13 +1635,15 @@ class WebcamPreviewWindow(QWidget):
 
         self._capture_queue: queue.Queue = queue.Queue(maxsize=2)
         self._processed_queue: queue.Queue = queue.Queue(maxsize=2)
-        self._stop_event = threading.Event()
 
+        global _LIVE_GENERATION
+        _LIVE_GENERATION += 1
         self._capture_worker = _CaptureWorker(
             self._cap, self._capture_queue, self._stop_event
         )
         self._processing_worker = _ProcessingWorker(
-            self._capture_queue, self._processed_queue, self._stop_event, camera_fps
+            self._capture_queue, self._processed_queue, self._stop_event, camera_fps,
+            _LIVE_GENERATION,
         )
         self._capture_worker.start()
         self._processing_worker.start()
@@ -1320,6 +1653,7 @@ class WebcamPreviewWindow(QWidget):
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._timer.start(poll_ms)
+        self.started = True
 
     def _tick(self) -> None:
         if self._stop_event.is_set():
@@ -1332,33 +1666,73 @@ class WebcamPreviewWindow(QWidget):
         bgr_frame = fit_image_to_size(bgr_frame, self.width(), self.height())
         self._image_label.setPixmap(_bgr_to_qpixmap(bgr_frame))
 
-    def closeEvent(self, event) -> None:
+    def shutdown(self) -> None:
+        """Stop the live threads and release the camera. Safe to call twice."""
+        if self._shut_down:
+            return
+        self._shut_down = True
         self._stop_event.set()
-        try:
+        if self._timer is not None:
             self._timer.stop()
-        except Exception:
-            pass
-        for worker in (self._capture_worker, self._processing_worker):
+        capture_stopped = True
+        if self._capture_worker is not None:
+            # read() gives up after ~1s without a frame, so this returns quickly.
+            capture_stopped = self._capture_worker.wait(5000)
+            if not capture_stopped:
+                _keep_until_finished(self._capture_worker)
+        if self._processing_worker is not None and not self._processing_worker.wait(5000):
+            _keep_until_finished(self._processing_worker)
+        if capture_stopped:
             try:
-                worker.wait(2000)
+                self._cap.release()
             except Exception:
                 pass
-        try:
-            self._cap.release()
-        except Exception:
-            pass
+        else:
+            # Releasing under a blocked read() would crash; release once it returns.
+            cap = self._cap
+            self._capture_worker.finished.connect(lambda: cap.release())
+
+    def closeEvent(self, event) -> None:
+        self.shutdown()
         global _WEBCAM_PREVIEW
         if _WEBCAM_PREVIEW is self:
             _WEBCAM_PREVIEW = None
         event.accept()
 
 
-def _open_webcam_preview(camera_index: int) -> None:
+def _open_webcam_preview(camera_index: int, camera_uid: Optional[str] = None) -> None:
     global _WEBCAM_PREVIEW
     if _WEBCAM_PREVIEW is not None:
         _WEBCAM_PREVIEW.close()
-    _WEBCAM_PREVIEW = WebcamPreviewWindow(camera_index)
-    _WEBCAM_PREVIEW.show()
+    window = WebcamPreviewWindow(camera_index, camera_uid)
+    if not window.started:
+        window.shutdown()
+        window.deleteLater()
+        return
+    _WEBCAM_PREVIEW = window
+    window.show()
+
+
+def stop_live_threads() -> None:
+    """Stop the live session before quitting. Safe to call repeatedly."""
+    if _WEBCAM_PREVIEW is not None:
+        _WEBCAM_PREVIEW.close()
+    _PENDING_WORKERS[:] = [w for w in _PENDING_WORKERS if not w.isFinished()]
+
+
+def _finish_pending_workers() -> None:
+    """After the event loop: give leftover live threads a bounded chance to end.
+
+    If one is still running, exit hard — PySide's shutdown would destroy the
+    running QThread, which aborts with a crash report.
+    """
+    deadline = time.monotonic() + 15.0
+    for worker in list(_PENDING_WORKERS):
+        worker.wait(max(0, int((deadline - time.monotonic()) * 1000)))
+    if any(w.isRunning() for w in _PENDING_WORKERS):
+        print("[live] a live thread did not stop in time; exiting without Qt cleanup", flush=True)
+        sys.stderr.flush()
+        os._exit(0)
 
 
 # ─── mapper dialogs (image/video + live) ────────────────────────────────
@@ -1468,9 +1842,10 @@ class MapperDialog(QDialog):
 class LiveMapperDialog(QDialog):
     """Source × Target mapper for live webcam mode."""
 
-    def __init__(self, camera_index: int, mapping: list):
+    def __init__(self, camera_index: int, mapping: list, camera_uid: Optional[str] = None):
         super().__init__(_MAIN)
         self._camera_index = camera_index
+        self._camera_uid = camera_uid
         self._map = mapping
         self.setWindowTitle(_("Source x Target Mapper"))
         self.resize(POPUP_LIVE_WIDTH, POPUP_LIVE_HEIGHT)
@@ -1578,8 +1953,15 @@ class LiveMapperDialog(QDialog):
         if has_valid_map():
             simplify_maps()
             self.set_status("Mappings successfully submitted!")
+            index = self._camera_index
+            if self._camera_uid is not None:
+                # The dialog can stay open a while; devices may have shifted.
+                index = next((i for i, _n, u in _camera_entries() if u == self._camera_uid), None)
+                if index is None:
+                    self.set_status("Camera not found, the list was refreshed")
+                    return
             self.accept()
-            _open_webcam_preview(self._camera_index)
+            _open_webcam_preview(index, self._camera_uid)
         else:
             self.set_status("At least 1 source with target is required!")
 
@@ -1591,10 +1973,10 @@ def _open_mapper_dialog(start_cb: Callable, mapping: list) -> None:
     _MAPPER.show()
 
 
-def _open_live_mapper_dialog(camera_index: int, mapping: list) -> None:
+def _open_live_mapper_dialog(camera_index: int, mapping: list, camera_uid: Optional[str] = None) -> None:
     global _LIVE_MAPPER
     close_mapper_window()
-    _LIVE_MAPPER = LiveMapperDialog(camera_index, mapping)
+    _LIVE_MAPPER = LiveMapperDialog(camera_index, mapping, camera_uid)
     _LIVE_MAPPER.show()
 
 
@@ -1620,7 +2002,10 @@ class _Window:
 
     def mainloop(self) -> None:
         self._main.show()
+        # Cmd+Q path: same live-thread shutdown as closing the main window.
+        self._app.aboutToQuit.connect(stop_live_threads)
         self._app.exec()
+        _finish_pending_workers()
 
 
 def init(

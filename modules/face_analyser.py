@@ -1,6 +1,7 @@
 import os
 import shutil
 from typing import Any
+import cv2
 import insightface
 import threading
 
@@ -180,6 +181,36 @@ def get_one_face(frame: Frame, faces: Any = None) -> Any:
         return None
 
 
+def get_largest_face(frame: Frame) -> Any:
+    faces = _analyse_faces(frame)
+    return max(faces, key=_face_area) if faces else None
+
+
+def _face_area(face: Any) -> float:
+    x1, y1, x2, y2 = face.bbox[:4]
+    return float((x2 - x1) * (y2 - y1))
+
+
+def load_source_face(path: str) -> Any:
+    """Read a source photo and return its main face, or None.
+
+    Returns None for unreadable files (e.g. an HTML page saved as .jpg).
+    Tight close-up portraits often defeat the detector at 640x640, so if
+    nothing is found the image is retried with a black border around it.
+    """
+    image = imread_unicode(path) if path else None
+    if image is None or getattr(image, "ndim", 0) != 3:
+        return None
+    face = get_largest_face(image)
+    for ratio in (0.3, 0.6):
+        if face is not None:
+            break
+        pad = int(max(image.shape[:2]) * ratio)
+        padded = cv2.copyMakeBorder(image, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+        face = get_largest_face(padded)
+    return face
+
+
 def get_many_faces(frame: Frame) -> Any:
     try:
         if _is_dml():
@@ -201,7 +232,9 @@ def detect_one_face_fast(frame: Frame) -> Any:
     bboxes, kpss = fa.det_model.detect(frame, max_num=0, metric='default')
     if bboxes.shape[0] == 0:
         return None
-    idx = int(bboxes[:, 0].argmin())
+    # Largest face = the person at the camera, not a poster behind them.
+    areas = (bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])
+    idx = int(areas.argmax())
     return Face(bbox=bboxes[idx, :4], kps=kpss[idx], det_score=bboxes[idx, 4])
 
 
