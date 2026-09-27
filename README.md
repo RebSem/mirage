@@ -134,7 +134,9 @@ Mirage is not live yet, or its frames are not getting through (see
 Mirage can also swap faces in photos and videos you already have. Click
 **Photos & videos** at the top of the window (**Live** takes you back; a call
 in progress keeps going, with fewer frames per second while Mirage works on a
-file). Your faces and the *Look* settings on the right work in both modes.
+file). Your faces and the *Look* settings on the right work in both modes, but
+each mode remembers its own selected face: picking faces for a photo never
+changes the face you wear in a running call.
 
 1. **Open** photos or a video: click **Open…**, press `⌘⇧O`, or drag files
    or a folder onto the stage. Photos dropped on the sidebar are added to your
@@ -155,7 +157,8 @@ file). Your faces and the *Look* settings on the right work in both modes.
 The result is saved next to the original as `name-mirage.jpg` (in the
 original's format; iPhone HEIC photos become JPEG). The original is never
 changed or overwritten: if the name is taken, you get `name-mirage-2.jpg`.
-EXIF data such as the date and the place is kept.
+EXIF data such as the date and the place is kept, and the file notes that its
+faces were swapped with Mirage.
 
 **Many photos at once.** Drop several photos or a folder, then press
 **Swap in N photos**. Each photo gets the automatic choice from step 2 and

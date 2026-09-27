@@ -19,7 +19,8 @@ Photos & videos: swap faces in the photos and videos you already have.
 - **Photos & videos** mode, next to Live: a **Live | Photos & videos** switch
   in the title bar (remembered between launches). The face gallery and the
   *Look* settings are shared, and a live call keeps running in the
-  background. Open files with **Open…**, `⌘⇧O` (*File → Open Photos or
+  background. The mode keeps its own selected face, so choosing faces for a
+  photo never changes (or turns off) the face you wear in a running call. Open files with **Open…**, `⌘⇧O` (*File → Open Photos or
   Video…*) or by dropping files or folders on the stage; photos dropped on
   the sidebar are still added to your faces.
 - Mirage decides who gets swapped: you, if a gallery face is marked
@@ -32,25 +33,31 @@ Photos & videos: swap faces in the photos and videos you already have.
   age), with the best ones marked *★ good match*. **Give everyone the
   selected face** swaps every face at once.
 - Photos are swapped at full resolution, and **Enhance faces** (on by
-  default) restores detail on the swapped faces only with GFPGAN (about
+  default) restores detail on the swapped faces only with GFPGAN, blended
+  through a soft face-shaped mask so hair, background and other people stay
+  exactly as they were (about
   0.4–0.5 s per face on a MacBook Air M1; the model, about 370 MB, is
   downloaded the first time). Hold the compare button or `Space` to see the
   original.
 - **Save** (`⌘S`) writes `name-mirage.jpg` next to the original (in the
   original's format; HEIC becomes JPEG), never overwriting anything
   (`-mirage-2`, `-mirage-3`, …). EXIF is kept with the orientation reset and
-  the old embedded thumbnail removed; the ICC profile and DPI are kept.
+  the old embedded thumbnail removed; the ICC profile and DPI are kept. The
+  file's EXIF also says that its faces were swapped with Mirage.
 - Batch: drop several photos or a folder and press **Swap in N photos**.
   Each photo gets the automatic choice and is saved next to its original;
   a list shows every file's status (*Saved*, *No face*, *Failed*, …), and
-  **Cancel** stops after the current photo.
+  **Cancel** stops after the current photo; **Continue (N left)** picks up
+  where it stopped.
 - Videos (MP4, MOV, M4V, MKV, AVI, WebM): **Make video** shows progress and
   the time left and saves `name-mirage.mp4` next to the original. H.264 on
   the Mac's hardware encoder (VideoToolbox, with libx264 as a fallback), the
   original sound (re-encoded to AAC only if needed) and the same frame rate;
   iPhone HDR is tone-mapped to SDR. People are followed by who they are, not
-  where they are, so the right face stays on the right person. **Cancel**
-  deletes the unfinished file. About 13–14 fps for a 720p video with one face
+  where they are, so the right face stays on the right person, also across
+  shot cuts and brief head turns. **Cancel** (or quitting Mirage) deletes the
+  unfinished file. WebM recordings from browsers, which often have no duration
+  in their header, open too. About 13–14 fps for a 720p video with one face
   on a MacBook Air M1. *Enhance faces (slower)* adds GPEN-BFR-256 to videos
   (off by default).
 - **This is me** / **This isn't me** in a gallery face's right-click menu.
