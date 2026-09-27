@@ -31,8 +31,10 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 from typing import NamedTuple
 
+import cv2
 import numpy as np
 
 from mirage.media.types import RenderOptions, VideoIdentity, VideoInfo, VideoProgress
@@ -46,6 +48,8 @@ Detection = tuple[np.ndarray, np.ndarray]
 
 _SEARCH_DIRS = ("/opt/homebrew/bin", "/usr/local/bin")  # a Finder-launched app has no Homebrew PATH
 _PROBE_TIMEOUT = 30.0
+_COUNT_TIMEOUT = 120.0                                     # reading every packet of a file without a length
+_MAX_FPS = 240                                             # above this a "rate" is a timebase (Matroska: 1000/1)
 _MP4_AUDIO = frozenset({"aac", "alac", "mp3"})             # copied as is; anything else → AAC
 _EFFICIENT_CODECS = frozenset({"hevc", "vp9", "av1"})      # need more H.264 bits for the same quality
 # Decoders VideoToolbox may accelerate; ffmpeg itself falls back to software if it can't.
@@ -205,16 +209,34 @@ def _inspect_cached(path: str, mtime_ns: int, size: int) -> _Stream:
     rotation = _rotation(video)
     width, height = (coded_h, coded_w) if rotation in (90, 270) else (coded_w, coded_h)
 
-    avg, nominal = _fraction(video.get("avg_frame_rate")), _fraction(video.get("r_frame_rate"))
-    fps = float(avg or nominal or 30)
+    index = int(video.get("index") or 0)
+    avg, nominal = _frame_rate(video.get("avg_frame_rate")), _frame_rate(video.get("r_frame_rate"))
+    duration = _float(video.get("duration")) or _float(fmt.get("duration")) or 0.0
+    reported = _float(video.get("nb_frames"))
+    if reported is not None and reported <= 1:
+        raise ValueError(f"{name} is a picture, not a video")
+    frames = int(reported or 0)
+    measured: Fraction | None = None
+    if not frames and not (duration and (avg or nominal)):
+        # A recording written as a stream (browser MediaRecorder WebM, OBS MKV) has no
+        # length in its header, and often only a timebase for a rate: count its frames.
+        frames, span = _count_frames(path, index, name)
+        if frames > 1 and span > 0:
+            measured = _frame_rate((frames - 1) / span)
+    elif frames and duration and not (avg or nominal):
+        measured = _frame_rate(frames / duration)
+    exact = avg or nominal or measured or Fraction(30)
+    fps = float(exact)
     # Frames are re-timed to one constant rate for decoding and encoding. Phone videos are
     # variable-rate around a nominal rate (avg 29.98, r 30/1): use the nominal one then,
     # the average when they disagree (r can be a timebase like 90000/1).
-    rate = nominal if nominal and avg and abs(nominal - avg) <= avg / 100 else (avg or nominal or Fraction(30))
-    duration = _float(video.get("duration")) or _float(fmt.get("duration")) or 0.0
-    frames = int(_float(video.get("nb_frames")) or 0) or int(round(duration * fps))
-    if frames <= 1 and duration <= 0:
+    rate = nominal if nominal and avg and abs(nominal - avg) <= avg / 100 else exact
+    frames = frames or int(round(duration * fps))
+    if frames == 0:
+        raise ValueError(f"{name}: the video has no frames")
+    if frames == 1:
         raise ValueError(f"{name} is a picture, not a video")
+    duration = duration or frames / fps
 
     audio = [s for s in streams if s.get("codec_type") == "audio"]
     bit_rate = int(_float(video.get("bit_rate")) or 0) or None
@@ -237,7 +259,7 @@ def _inspect_cached(path: str, mtime_ns: int, size: int) -> _Stream:
     sar = str(video.get("sample_aspect_ratio") or "").replace(":", "/")
     return _Stream(
         info=info,
-        index=int(video.get("index") or 0),
+        index=index,
         rate=f"{rate.numerator}/{rate.denominator}",
         bit_rate=bit_rate,
         pix_fmt=str(video.get("pix_fmt") or ""),
@@ -247,6 +269,32 @@ def _inspect_cached(path: str, mtime_ns: int, size: int) -> _Stream:
         audio_index=int(audio[0].get("index") or 0) if audio else None,
         audio_codec=str(audio[0].get("codec_name") or "") if audio else "",
     )
+
+
+def _count_frames(path: str, index: int, name: str) -> tuple[int, float]:
+    """Frames (packets) of one stream, and the seconds their timestamps span: a demux pass, no decoding."""
+    cmd = [_tools()[1], "-v", "error", "-select_streams", str(index), "-show_entries", "packet=pts_time", "-of", "csv=p=0", path]
+    try:
+        result = subprocess.run(cmd, capture_output=True, timeout=_COUNT_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"{name}: reading the file took too long") from None
+    if result.returncode != 0:
+        raise ValueError(f"{name} is not a video Mirage can read")
+    lines = result.stdout.decode("ascii", "replace").split()
+    times = []
+    for line in lines:
+        try:
+            times.append(float(line.split(",")[0]))
+        except ValueError:
+            pass                                   # N/A: a packet without a timestamp still counts
+    span = max(times) - min(times) if len(times) > 1 else 0.0
+    return len(lines), span
+
+
+def _frame_rate(value) -> Fraction | None:
+    """A frame rate from ffprobe's text or a number; None if missing or really a timebase."""
+    rate = _fraction(value) if isinstance(value, str) else (Fraction(value).limit_denominator(1001) if value else None)
+    return rate if rate is not None and 0 < rate <= _MAX_FPS else None
 
 
 def _rotation(stream: dict) -> int:
@@ -697,14 +745,22 @@ class TrackedFace(NamedTuple):
     kps: np.ndarray            # (5, 2) smoothed landmarks
 
 
+_LONG_AGO = -(1 << 30)
+
+
 @dataclass
 class _Track:
     bbox: np.ndarray           # last raw detection, for overlap matching
     smoother: FaceSmoother
     seen_at: int
-    embedded_at: int = -(1 << 30)
-    sims: np.ndarray | None = None       # cosine similarity to each identity, from the last embedding
+    due_at: int = _LONG_AGO              # frame the next recognition is due
+    sims: np.ndarray | None = None       # cosine similarity to each identity, from the last look trusted
     identity: int | None = None
+    weak_since: int | None = None        # first frame of the current run of weak looks
+
+    def forget(self) -> None:
+        self.due_at, self.sims, self.identity, self.weak_since = _LONG_AGO, None, None, None
+        self.smoother.reset()
 
 
 def _unit(vector: np.ndarray) -> np.ndarray:
@@ -728,14 +784,22 @@ class IdentityTracker:
     """Follows faces from frame to frame and says which chosen person each one is.
 
     Faces are matched to the previous frame by box overlap (IoU); recognition
-    (``embed_fn``) runs only for a new face, every ``reid_every`` frames per
-    face, and whenever faces overlap (two people crossing could swap tracks).
+    (``embed_fn``) runs for a new face, every ``reid_every`` frames per face,
+    whenever faces overlap (two people crossing could swap tracks) and whenever
+    a box jumps (IoU with its last box under ``iou_steady``: maybe someone else).
     A face is identity k if its cosine similarity to k is the best and at least
     ``threshold`` (a face already known as k keeps it down to 75 % of that, so a
     turned head doesn't flicker). Each person is given to at most one face per frame.
+
+    A weak look (no identity reaches its limit) is checked again 1, 3 and 7
+    frames later. Meanwhile a known face that stayed in place, alone, keeps its
+    identity (a blink, blur or hand over the face); it loses it only if the face
+    still looks weak ``HOLD_FRAMES`` frames on, or at once if it looks like
+    another chosen person. invalidate() (a cut) makes everyone a stranger again.
     """
 
     KEEP_RATIO = 0.75
+    HOLD_FRAMES = 7
 
     def __init__(
         self,
@@ -744,14 +808,21 @@ class IdentityTracker:
         reid_every: int = 12,
         iou_match: float = 0.3,
         keep_missing: int = 5,
+        iou_steady: float = 0.5,
     ) -> None:
         self.threshold = threshold
         self.reid_every = max(1, reid_every)
         self.iou_match = iou_match
+        self.iou_steady = iou_steady
         self.keep_missing = keep_missing      # frames a face may go undetected and keep its track
         self._identities = np.stack([_unit(e) for e in identities]) if len(identities) else None
         self._tracks: list[_Track] = []
         self.embed_calls = 0
+
+    def invalidate(self) -> None:
+        """A cut: nobody is anyone any more; every face is recognised afresh on its next update."""
+        for track in self._tracks:
+            track.forget()
 
     def update(
         self,
@@ -782,18 +853,18 @@ class IdentityTracker:
             if t is None:
                 track = _Track(bbox=bbox, smoother=FaceSmoother(), seen_at=frame_index)
                 self._tracks.append(track)
-                crowded = False
+                steady = False
             else:
                 track = self._tracks[t]
-                crowded = bool(crowded_dets[d] or crowded_tracks[t])
+                # alone and barely moved: surely the same face as last frame
+                steady = not (crowded_dets[d] or crowded_tracks[t]) and iou[d, t] >= self.iou_steady
             track.bbox, track.seen_at = bbox, frame_index
-            due = track.sims is None or crowded or frame_index - track.embedded_at >= self.reid_every
+            due = track.sims is None or not steady or frame_index >= track.due_at
             if due and self._identities is not None:
                 self.embed_calls += 1
                 embedding = embed_fn(d)
                 if embedding is not None:
-                    track.sims = self._identities @ _unit(embedding)
-                    track.embedded_at = frame_index
+                    self._look(track, self._identities @ _unit(embedding), frame_index, steady)
             tracks.append(track)
 
         identities = self._assign(tracks)
@@ -802,6 +873,27 @@ class IdentityTracker:
             bbox, kps = track.smoother.update(boxes[d], kpss[d])
             out.append(TrackedFace(identities[d], bbox, kps))
         return out
+
+    def _look(self, track: _Track, sims: np.ndarray, frame_index: int, steady: bool) -> None:
+        """Take in a fresh recognition of a track's face and plan the next one."""
+        limits = np.full(len(sims), self.threshold, dtype=np.float32)
+        if track.identity is not None:
+            limits[track.identity] *= self.KEEP_RATIO
+        if bool((sims >= limits).any()):
+            track.sims, track.weak_since = sims, None
+            track.due_at = frame_index + self.reid_every
+            return
+        # weak: a stranger, or a known face turned away, blurred or covered for a moment
+        if track.weak_since is None:
+            track.weak_since = frame_index
+        age = frame_index - track.weak_since
+        if age < self.HOLD_FRAMES:
+            track.due_at = frame_index + max(1, min(age + 1, self.HOLD_FRAMES - age, self.reid_every))
+            if track.identity is not None and steady:
+                return                 # keeps its identity, and the looks that earned it, for now
+        else:
+            track.due_at = frame_index + self.reid_every
+        track.sims = sims
 
     def _assign(self, tracks: list[_Track]) -> list[int | None]:
         candidates = []
@@ -821,6 +913,39 @@ class IdentityTracker:
         for track, identity in zip(tracks, result, strict=True):
             track.identity = identity
         return result
+
+
+class ShotCuts:
+    """Spots hard cuts between consecutive frames (about 0.4 ms for a 4K frame).
+
+    Each frame becomes a 64x36 grey thumbnail with its brightness and contrast
+    taken out (mean 0, spread 1). A cut moves everything, so the mean difference
+    to the previous thumbnail jumps: 0.73-1.2 on real and synthetic cuts, dark
+    scenes included. A flash, fade or exposure change only rescales the picture
+    (≤ 0.51), shaky handheld footage or a brisk pan stays ≤ 0.6. Raw grey
+    differences don't separate these: a flash differs by 40-90 levels, a cut
+    between two dark shots by under 10.
+    """
+
+    THRESHOLD = 0.65
+    _SIZE = (64, 36)
+    _MIN_SPREAD = 8.0          # grey levels; flatter pictures (black, fog) aren't stretched further
+
+    def __init__(self, threshold: float = THRESHOLD) -> None:
+        self.threshold = threshold
+        self._last: np.ndarray | None = None
+
+    def __call__(self, frame: np.ndarray) -> bool:
+        """True if `frame` starts a new shot (never for the first frame)."""
+        w, h = self._SIZE
+        if frame.shape[1] > 8 * w or frame.shape[0] > 8 * h:
+            # a cheap first step: area-averaging a whole 4K frame costs ~9 ms, this ~0.3 ms
+            frame = cv2.resize(frame, (8 * w, 8 * h), interpolation=cv2.INTER_LINEAR)
+        small = cv2.resize(frame, self._SIZE, interpolation=cv2.INTER_AREA)
+        grey = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        grey = (grey - grey.mean()) / max(float(grey.std()), self._MIN_SPREAD)
+        last, self._last = self._last, grey
+        return last is not None and float(np.abs(grey - last).mean()) >= self.threshold
 
 
 # ── rendering ────────────────────────────────────────────────────────────
@@ -895,6 +1020,65 @@ def _move_detector_to_gpu(detector, path: str) -> None:
         detector.session = cpu_session
 
 
+@functools.lru_cache(maxsize=4)
+def _feather(size: int) -> np.ndarray:
+    """The enhancer's blend mask: 1 inside, fading to 0 over the outer 1/16 (as upstream); read only."""
+    mask = np.ones((size, size), dtype=np.float32)
+    border = max(1, size // 16)
+    ramp = np.linspace(0, 1, border)
+    mask[:border, :] = ramp[:, None]
+    mask[-border:, :] = ramp[::-1][:, None]
+    mask[:, :border] = np.minimum(mask[:, :border], ramp[None, :])
+    mask[:, -border:] = np.minimum(mask[:, -border:], ramp[::-1][None, :])
+    return mask
+
+
+def _paste_face(frame: np.ndarray, face: np.ndarray, inv_m: np.ndarray) -> np.ndarray:
+    """Blend an aligned face crop back into `frame` (in place), touching only the pixels under it.
+
+    Same result (to OpenCV's 1/32 px warp precision) as warping the crop and its
+    mask to the whole frame and blending everywhere, upstream's way, which at 4K
+    takes ~120 ms and ~0.4 GB of float temporaries per face; this ~6 ms.
+    """
+    size = face.shape[0]
+    h, w = frame.shape[:2]
+    # the crop's outline in the frame (one pixel beyond: bilinear sampling reaches that far)
+    outline = np.array([[-1, -1, 1], [size, -1, 1], [-1, size, 1], [size, size, 1]], dtype=np.float64) @ inv_m.T
+    (x0, y0), (x1, y1) = np.floor(outline.min(axis=0)) - 1, np.ceil(outline.max(axis=0)) + 2
+    x0, y0, x1, y1 = max(0, int(x0)), max(0, int(y0)), min(w, int(x1)), min(h, int(y1))
+    if x1 <= x0 or y1 <= y0:
+        return frame
+    shifted = np.array(inv_m, dtype=np.float64)
+    shifted[:, 2] -= (x0, y0)
+    roi_size = (x1 - x0, y1 - y0)
+    warped = cv2.warpAffine(face, shifted, roi_size, flags=cv2.INTER_LINEAR, borderValue=(0, 0, 0))
+    alpha = cv2.warpAffine(_feather(size), shifted, roi_size, flags=cv2.INTER_LINEAR, borderValue=0)[..., None]
+    roi = frame[y0:y1, x0:x1]
+    blended = warped.astype(np.float32) * alpha + roi.astype(np.float32) * (1.0 - alpha)
+    roi[:] = np.clip(blended, 0, 255).astype(np.uint8)
+    return frame
+
+
+def _enhance_face(frame: np.ndarray, kps: np.ndarray, session, size: int) -> np.ndarray:
+    """GPEN on one face, as modules' enhance_face_onnx but pasted back with _paste_face (Live keeps upstream's)."""
+    from modules.processors.frame._onnx_enhancer import (
+        THREAD_SEMAPHORE,
+        _get_face_affine,
+        postprocess_face,
+        preprocess_face,
+        run_inference,
+    )
+
+    m, inv_m = _get_face_affine(SimpleNamespace(kps=np.asarray(kps, np.float32)), size)
+    if m is None:
+        return frame
+    crop = cv2.warpAffine(frame, m, (size, size), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    blob = preprocess_face(crop, size)
+    with THREAD_SEMAPHORE:
+        output = run_inference(session, session.get_inputs()[0].name, blob)
+    return _paste_face(frame, postprocess_face(output), inv_m)
+
+
 def default_hooks(options: RenderOptions | None = None) -> VideoHooks:
     """The real models (loaded now, so a missing model fails before the render starts)."""
     import importlib
@@ -942,10 +1126,18 @@ def default_hooks(options: RenderOptions | None = None) -> VideoHooks:
     enhance = None
     if options is not None and options.video_enhance:
         enhancer = importlib.import_module("modules.processors.frame.face_enhancer_gpen256")
-        enhancer.get_enhancer()
+        session = enhancer.get_enhancer()
+        failed = False
 
         def enhance(frame: np.ndarray, bbox: np.ndarray, kps: np.ndarray) -> np.ndarray:
-            return enhancer.enhance_face(frame, Face(bbox=bbox, kps=np.asarray(kps, np.float32)))
+            nonlocal failed
+            try:
+                return _enhance_face(frame, kps, session, enhancer.INPUT_SIZE)
+            except Exception as exc:       # like upstream: an unenhanced face beats a failed render
+                if not failed:
+                    log.warning("face enhancement failed, faces are left as swapped: %s", exc)
+                    failed = True
+                return frame
 
     return VideoHooks(detect=detect, embed=embed, swap=swap, enhance=enhance)
 
@@ -1011,16 +1203,21 @@ def _analyse_stage(
     out: queue.Queue,
     pipe: _Pipeline,
 ) -> None:
-    """Detection (GPU), tracking and the occasional recognition, a few frames ahead of the swaps.
+    """Detection (GPU), cut spotting, tracking and the occasional recognition, a few frames ahead of the swaps.
 
     Keeping recognition here leaves the calling thread nothing but swaps, the
     Neural Engine work that sets the pace.
     """
     try:
         index = 0
+        cuts = ShotCuts()
         while (frame := pipe.get(src)) is not _END:
             targets: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
             if hooks is not None:
+                if cuts(frame):
+                    # someone else may stand where the last shot's person stood
+                    log.debug("shot change at frame %d", index)
+                    tracker.invalidate()
                 faces = hooks.detect(frame)
                 tracked = tracker.update(index, faces, lambda d, f=frame, fs=faces: hooks.embed(f, fs[d][0], fs[d][1]))
                 for identity, bbox, kps in tracked:

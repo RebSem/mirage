@@ -11,7 +11,9 @@ import sys
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
+import cv2
 import numpy as np
 import pytest
 
@@ -193,11 +195,90 @@ def test_tracker_leaves_strangers_alone_and_gives_each_person_once():
 def test_tracker_hysteresis_keeps_a_known_face_through_a_weak_look():
     ids = _identities(3)
     tracker = V.IdentityTracker(ids[:2], threshold=0.40, reid_every=1)
-    looks = {0: ids[0], 1: _blend(ids[0], ids[2], 0.33), 2: _blend(ids[0], ids[2], 0.2)}
-    got = [tracker.update(f, [_face(100)], lambda d, f=f: looks[f])[0].identity for f in range(3)]
-    assert got == [0, 0, None]
+    looks = {0: ids[0], 1: _blend(ids[0], ids[2], 0.33)}           # 0.33: above 75 % of the threshold
+    got = [tracker.update(f, [_face(100)], lambda d, f=f: looks[f])[0].identity for f in range(2)]
+    assert got == [0, 0]
     fresh = V.IdentityTracker(ids[:2], threshold=0.40)
     assert fresh.update(0, [_face(100)], lambda d: looks[1])[0].identity is None
+
+
+def _run(tracker: V.IdentityTracker, frames: int, face, look, cuts=()) -> tuple[str, list[int]]:
+    """Identity per frame as a string ('A' = identity 0, '.' = none) and the frames recognition ran on."""
+    shown, calls = "", []
+    for f in range(frames):
+        if f in cuts:
+            tracker.invalidate()
+        result = tracker.update(f, [face(f)], lambda d, f=f: calls.append(f) or look(f))
+        shown += "A" if result[0].identity == 0 else "."
+    return shown, calls
+
+
+def _stand_in(a: np.ndarray, b: np.ndarray, w: float):
+    """A until frame 5, then B 40 px over until 25, then A again: (face at frame f, embedding at frame f)."""
+
+    def face(f: int):
+        return _face(140 if 5 <= f < 25 else 100, w=w)
+
+    def look(f: int) -> np.ndarray:
+        return b if 5 <= f < 25 else a
+
+    return face, look
+
+
+def test_tracker_reidentifies_at_a_cut():
+    # A for 5 frames, a hard cut to stranger B standing 40 px over (the boxes still overlap:
+    # IoU 0.67, so tracking alone can't tell), then a cut back to A
+    a, b = _identities(2)
+    face, look = _stand_in(a, b, w=200)
+    shown, calls = _run(V.IdentityTracker([a]), 40, face, look, cuts=(5, 25))
+    assert shown == "A" * 5 + "." * 20 + "A" * 15
+    assert {5, 25} <= set(calls)
+    # the scenario needs the cut: tracking alone keeps A on B for a while (ShotCuts is what calls invalidate)
+    assert _run(V.IdentityTracker([a]), 40, face, look)[0] != shown
+
+
+def test_tracker_rechecks_a_face_whose_box_jumped():
+    a, b = _identities(2)
+    face, look = _stand_in(a, b, w=100)                            # IoU 0.43 with the last box
+    shown, calls = _run(V.IdentityTracker([a]), 40, face, look)
+    assert shown == "A" * 5 + "." * 20 + "A" * 15
+    assert {5, 25} <= set(calls)
+
+
+def test_tracker_holds_an_identity_through_a_short_weak_spell():
+    a, b = _identities(2)
+    weak = _blend(a, b, 0.1)                                       # a turned, blurred or covered face
+
+    def still(f: int):
+        return _face(100, w=100)
+
+    hold = V.IdentityTracker.HOLD_FRAMES
+
+    # five weak frames from the due re-identification at 12: looked at again 1, 3 and 7 frames later
+    shown, calls = _run(V.IdentityTracker([a]), 40, still, lambda f: weak if 12 <= f < 17 else a)
+    assert shown == "A" * 40
+    assert calls == [0, 12, 13, 15, 19, 31]
+
+    # weak for good: the identity goes once the face still looks weak HOLD_FRAMES frames on
+    shown, _ = _run(V.IdentityTracker([a]), 40, still, lambda f: weak if f >= 12 else a)
+    assert shown == "A" * (12 + hold) + "." * (40 - 12 - hold)
+
+    # looking like another chosen person switches at once
+    tracker = V.IdentityTracker([a, b])
+    got = [tracker.update(f, [still(f)], lambda d, f=f: b if f >= 12 else a)[0].identity for f in range(14)]
+    assert got == [0] * 12 + [1, 1]
+
+    # a cut still clears the identity at once, weak look or not
+    shown, _ = _run(V.IdentityTracker([a]), 20, still, lambda f: weak if f >= 12 else a, cuts=(12,))
+    assert shown == "A" * 12 + "." * 8
+
+
+def test_tracker_retries_a_new_face_that_first_looked_weak():
+    a, b = _identities(2)
+    weak = _blend(a, b, 0.1)
+    shown, calls = _run(V.IdentityTracker([a]), 20, lambda f: _face(100, w=100), lambda f: weak if f < 2 else a)
+    assert shown == "..." + "A" * 17          # found on the retry 3 frames in, not at the next re-id (12)
+    assert calls == [0, 1, 3, 15]
 
 
 def test_tracker_forgets_faces_that_leave_and_smooths_boxes():
@@ -222,6 +303,46 @@ def test_tracker_without_identities_never_runs_recognition():
     tracker = V.IdentityTracker([])
     result = tracker.update(0, [_face(0)], lambda d: pytest.fail("embed_fn called"))
     assert result[0].identity is None
+
+
+# ── shot cuts (pure numpy) ───────────────────────────────────────────────
+
+
+def _scene(seed: int, w: int = 1600, h: int = 800) -> np.ndarray:
+    """Footage-like: most contrast in big shapes (a 1/f-ish spectrum), a little fine texture."""
+    rng = np.random.default_rng(seed)
+    image = np.zeros((h, w, 3), np.float32)
+    for sigma, amp in ((60, 50), (20, 25), (6, 10), (1.5, 4)):
+        layer = cv2.GaussianBlur(rng.normal(size=(h, w, 3)).astype(np.float32), (0, 0), sigma)
+        image += layer / layer.std() * amp
+    return image + rng.uniform(70, 170, 3).astype(np.float32)
+
+
+def _shoot(scene: np.ndarray, x: int, gain: float = 1.0, seed: int = 0, blur: int = 0) -> np.ndarray:
+    """A 1280x720 frame of `scene` from x, with exposure `gain`, sensor noise and horizontal motion blur."""
+    crop = scene[40:760, x : x + 1280]
+    if blur:
+        crop = cv2.blur(crop, (blur, 1))
+    noise = np.random.default_rng(seed).normal(0, 3, crop.shape)
+    return np.clip(crop * gain + noise, 0, 255).astype(np.uint8)
+
+
+def test_shot_cuts_fire_on_cuts_only():
+    a, b = _scene(1), _scene(2)
+    frames = []
+    for i in range(30):                   # handheld pan; a camera flash at 5, exposure falling from 10
+        gain = 2.2 if i == 5 else max(0.5, 1.0 - 0.05 * max(0, i - 10))
+        frames.append(_shoot(a, 20 + 12 * i + (i * 7919) % 9, gain, seed=i))
+    for i in range(10):                   # cut at 30: another place, a brisk motion-blurred pan
+        frames.append(_shoot(b, 10 + 32 * i, seed=100 + i, blur=24))
+    for i in range(8):                    # cut at 40 into a dark shot, at 44 into another dark one
+        frames.append(_shoot(a if i < 4 else b, 200 + 6 * i, 0.25, seed=200 + i))
+    cuts = V.ShotCuts()
+    assert [i for i, frame in enumerate(frames) if cuts(frame)] == [30, 40, 44]
+    small = V.ShotCuts()                  # small frames skip the first shrinking step
+    assert [small(cv2.resize(f, (320, 180), interpolation=cv2.INTER_AREA)) for f in frames[28:32]] == [
+        False, False, True, False,
+    ]
 
 
 # ── probe / sample_frames ────────────────────────────────────────────────
@@ -257,6 +378,35 @@ def test_probe_rejects_non_videos(tmp_path: Path):
         V.probe(picture)
     with pytest.raises(FileNotFoundError):
         V.probe(tmp_path / "missing.mp4")
+
+
+@needs_ffmpeg
+def test_probe_reads_a_recording_without_a_length(tmp_path: Path):
+    # Like a browser's MediaRecorder file: WebM written as a stream (no duration, no frame
+    # count) with 1 ms timestamps, so ffprobe's average rate is the 1000/1 timebase.
+    assert TOOLS is not None
+    encoders = subprocess.run([TOOLS[0], "-hide_banner", "-encoders"], capture_output=True, text=True).stdout
+    codec, fmt = (["-c:v", "libvpx", "-b:v", "1M"], "webm") if " libvpx " in encoders else (["-c:v", "mpeg4"], "matroska")
+    recording = tmp_path / f"recording.{'webm' if fmt == 'webm' else 'mkv'}"
+    cmd = [
+        TOOLS[0], "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r=1000:d={SECONDS}",
+        "-vf", "select='not(mod(n,40))'", "-fps_mode", "passthrough", *codec, "-f", fmt, "pipe:1",
+    ]
+    with recording.open("wb") as out:
+        subprocess.run(cmd, stdout=out, check=True, timeout=60)
+    header = subprocess.run(
+        [TOOLS[1], "-v", "error", "-show_entries", "format=duration:stream=nb_frames", "-of", "csv=p=0", str(recording)],
+        capture_output=True, text=True,
+    ).stdout
+    assert "N/A" in header and not any(ch.isdigit() for ch in header), header    # really no length
+
+    info = V.probe(recording)
+    assert info.fps == pytest.approx(25, abs=0.5)                 # one frame per 40 ms, not 1000 fps
+    assert info.frames == 25 * SECONDS
+    assert info.duration == pytest.approx(SECONDS, abs=0.1)
+    frames = _read_all(recording)
+    assert abs(len(frames) - info.frames) <= 1 and frames[0].shape == (H, W, 3)
 
 
 @needs_ffmpeg
@@ -496,6 +646,51 @@ def test_render_errors_are_reraised_without_output(clip_copy):
     assert not dst.exists() and _leftovers(src.parent) == []
     with pytest.raises(ValueError):
         V.render_video(src, src, [], RenderOptions(), hooks=models.hooks())
+
+
+@needs_ffmpeg
+def test_render_stops_swapping_at_a_cut_to_someone_else(tmp_path: Path):
+    # the chosen person, a hard cut at frame 30 (between two re-identifications), a stranger in the same spot
+    src, cut = tmp_path / "cut.mp4", 30
+    _ffmpeg(
+        "-f", "lavfi", "-i", f"testsrc2=s={W}x{H}:r={FPS}:d={cut / FPS}",
+        "-f", "lavfi", "-i", f"smptebars=s={W}x{H}:r={FPS}:d={(FRAMES - cut) / FPS}",
+        "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0", *_video_codec(), str(src),
+    )
+    person, stranger, face = _identities(3)
+    models = FakeModels(person)
+    models.embed = lambda frame, bbox, kps: person if models.detected <= cut else stranger
+    dst = V.render_video(src, tmp_path / "out.mp4", [VideoIdentity(person, face)], RenderOptions(), hooks=models.hooks())
+    frames = _read_all(dst)
+    assert len(frames) == FRAMES
+    assert all(_is_green(f) for f in frames[:cut])
+    assert not any(_is_green(f) for f in frames[cut:])
+
+
+def test_enhanced_face_pasted_back_in_its_box_matches_the_full_frame_blend():
+    upstream = pytest.importorskip("modules.processors.frame._onnx_enhancer")
+    size = 256
+    rng = np.random.default_rng(0)
+    # smooth like a real face: warps agree only to OpenCV's 1/32 px, which moves pixel noise
+    # by up to ~8 levels but a face by ≤ 1 (a paste one pixel off differs by > 100)
+    restored = cv2.GaussianBlur(rng.uniform(-1, 1, (size, size, 3)).astype(np.float32), (0, 0), 2)
+    restored = (restored / np.abs(restored).max()).transpose(2, 0, 1)[None].copy()
+    session = SimpleNamespace(
+        get_inputs=lambda: [SimpleNamespace(name="input")],
+        get_providers=lambda: ["CPUExecutionProvider"],
+        run=lambda names, feed: [restored],
+    )
+    frame = cv2.GaussianBlur(rng.integers(0, 256, (720, 1280, 3), dtype=np.uint8), (0, 0), 3)
+    # a face in the middle, one cut off by the top-left corner, one tilted
+    for x, y, tilt in ((600, 300, 0.0), (-20, -30, 0.0), (900, 400, 0.4)):
+        _, kps = _face(x, y, w=120)
+        centre = kps.mean(axis=0)
+        turn = np.array([[np.cos(tilt), -np.sin(tilt)], [np.sin(tilt), np.cos(tilt)]], dtype=np.float32)
+        kps = (kps - centre) @ turn.T + centre
+        full = upstream.enhance_face_onnx(frame.copy(), SimpleNamespace(kps=kps), session, size)
+        roi = V._enhance_face(frame.copy(), kps, session, size)
+        assert np.abs(full.astype(np.int16) - roi.astype(np.int16)).max() <= 2, (x, y, tilt)
+        assert np.abs(full.astype(np.int16) - frame.astype(np.int16)).max() > 50     # it did paste something
 
 
 # ── HDR (macOS VideoToolbox) ─────────────────────────────────────────────
