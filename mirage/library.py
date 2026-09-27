@@ -56,6 +56,8 @@ _NAME_SEPARATORS = re.compile(r"[_\-.]+")
 class DetectedFace(NamedTuple):
     embedding: np.ndarray  # float32, shape (512,)
     bbox: tuple[float, float, float, float]  # x1, y1, x2, y2 in the given image
+    gender: int | None = None  # insightface: 1 = male, 0 = female (for suggestions)
+    age: float | None = None
 
 
 Embedder = Callable[[np.ndarray], DetectedFace | None]  # BGR uint8 image in
@@ -77,6 +79,28 @@ class FaceEntry:
     image: str  # file name inside the library dir
     thumb: str
     embedding: str
+    gender: int | None = None  # used to suggest natural-looking swaps in photos
+    age: float | None = None
+
+
+def _clean_gender(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        g = int(value)  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        return None
+    return g if g in (0, 1) else None
+
+
+def _clean_age(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        age = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return round(age, 1) if math.isfinite(age) and 0 <= age <= 120 else None
 
 
 def _clean_name(name: str) -> str:
@@ -286,6 +310,8 @@ class FaceLibrary:
                 image=f"{face_id}.jpg",
                 thumb=f"{face_id}_thumb.jpg",
                 embedding=f"{face_id}.npy",
+                gender=_clean_gender(face.gender),
+                age=_clean_age(face.age),
             )
             for file_name, data in (
                 (entry.image, image_jpg),
@@ -330,6 +356,21 @@ class FaceLibrary:
             for file_name in (entry.image, entry.thumb, entry.embedding):
                 with contextlib.suppress(OSError):
                     (self.root / file_name).unlink(missing_ok=True)
+
+    def set_attributes(self, face_id: str, gender: int | None, age: float | None) -> None:
+        """Remember gender/age for suggestions (filled in lazily for older faces)."""
+        with self._lock:
+            entry = self._require(face_id)
+            new = (_clean_gender(gender), _clean_age(age))
+            if (entry.gender, entry.age) == new:
+                return
+            previous = (entry.gender, entry.age)
+            entry.gender, entry.age = new
+            try:
+                self._write_index()
+            except BaseException:
+                entry.gender, entry.age = previous
+                raise
 
     def rename(self, face_id: str, name: str) -> None:
         """Rename a face; a blank name keeps the current one."""
@@ -475,6 +516,8 @@ class FaceLibrary:
                 image=str(item["image"]),
                 thumb=str(item["thumb"]),
                 embedding=str(item["embedding"]),
+                gender=_clean_gender(item.get("gender")),
+                age=_clean_age(item.get("age")),
             )
         except (KeyError, TypeError, ValueError):
             return None
