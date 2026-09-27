@@ -130,6 +130,14 @@ if ! PYTHON="$(find_python)"; then
 fi
 ok "$("$PYTHON" --version) at $PYTHON"
 
+# Photos & videos: ffmpeg decodes and encodes videos (VideoToolbox on Apple Silicon)
+if command -v ffmpeg >/dev/null 2>&1 || [[ -x "$BREW_PREFIX/bin/ffmpeg" ]]; then
+  ok "ffmpeg found"
+else
+  info "Installing ffmpeg with Homebrew (needed to swap faces in videos)…"
+  brew install ffmpeg || warn "ffmpeg didn't install; photos and Live still work. Try later: brew install ffmpeg"
+fi
+
 # ── 4. virtualenv ───────────────────────────────────────────────────────────
 step "Preparing the virtual environment"
 if [[ -x "$VENV/bin/python" ]] && ! "$VENV/bin/python" -c "import sys" >/dev/null 2>&1; then
