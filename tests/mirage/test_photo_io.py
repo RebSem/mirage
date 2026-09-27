@@ -447,7 +447,9 @@ def test_heic_round_trip(tmp_path: Path) -> None:
     assert meta.format == "heic"
     assert image.shape == (60, 40, 3)
     assert _near(image[3, -4], RED_BGR) and _near(image[-4, 3], BLUE_BGR)
-    assert meta.exif is not None and meta.icc_profile
+    assert meta.exif is not None
+    # sips keeps the colour profile on recent macOS but not on macOS 14 (CI), so
+    # only check that whatever profile we read is carried over below.
 
     out = save_image(image, heic, meta)
 
@@ -457,6 +459,7 @@ def test_heic_round_trip(tmp_path: Path) -> None:
         exif = saved.getexif()
         assert exif[0x0112] == 1
         assert exif.get_ifd(0x8769)[0x9003] == DATE
+        assert saved.info.get("icc_profile") == meta.icc_profile
     assert sorted(p.name for p in tmp_path.iterdir()) == ["IMG_0001-mirage.jpg", "IMG_0001.heic"]
 
 
