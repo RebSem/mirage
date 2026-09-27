@@ -57,6 +57,54 @@ camera frame:
 * While live, the process holds an `NSProcessInfo` activity (no App Nap, no
   idle sleep).
 
+## Runtime picture: Photos & videos
+
+The **Live | Photos & videos** switch in the title bar flips a
+`QStackedWidget` between the live page and `MediaPage`
+(`mirage/ui/media_page.py`); the sidebar is shared. The live engine is not
+touched by the switch: a session keeps running while you work on files.
+[MEDIA.md](MEDIA.md) describes the media pipeline itself.
+
+```
+UI thread (MediaPage)                  worker threads, one job at a time
+─────────────────────                  ─────────────────────────────────
+open a file ── token += 1 ──────────►  mirage-analyze        load, find faces (CPU)
+                                       mirage-analyze-video  probe, 8 sample frames, find faces
+Swap ───────────────────────────────►  mirage-render         PhotoRenderer: swap + GFPGAN
+Save ───────────────────────────────►  mirage-save           photo_io.save_image
+Swap in N photos ───────────────────►  mirage-batch          batch.run_batch
+Make video ─────────────────────────►  mirage-video          video.render_video ─► read / detect / write
+                                                                                   threads + ffmpeg
+_on_analyzed, _on_rendered, …  ◄── Qt signals, queued: (token, result or error)
+```
+
+* Every step runs on a plain daemon `threading.Thread` (for the same reason
+  as Live: no `QThread` teardown aborts), so the UI thread never waits for a
+  model or a file.
+* Results come back through the page's own signals (`_analyzed`,
+  `_rendered`, `_saved`, `_batchUpdate`, `_batchDone`, `_videoProgress`,
+  `_videoDone`), emitted on the worker and queued to the UI thread. Each
+  payload carries the **token** of the job that produced it. Opening a new
+  photo, batch or video increments the token, and the handlers drop any
+  payload whose token is stale, so a slow result for a file you have already
+  replaced never lands on the new one.
+* One job at a time: while `busy`, **Open** is disabled and new files are
+  refused with a toast. Cancelling sets a `threading.Event`: a batch checks
+  it between files; a video render checks it all the time, kills ffmpeg and
+  deletes its temporary files.
+* A video render runs the swap loop on `mirage-video` itself and starts
+  three helpers, `mirage-video-read`, `mirage-video-detect` and
+  `mirage-video-write`, joined by bounded queues. ffmpeg runs as child
+  processes (decoder, encoder, final remux) whose stderr is drained by
+  `mirage-ffmpeg-stderr` threads. The first error in any stage stops all of
+  them and is raised on the render thread.
+* Models: photo analysis uses the CPU detector and `genderage.onnx`; photo
+  and video swaps use the same inswapper session as Live (Neural Engine);
+  video detection has its own 640 px detector on the GPU. `PhotoRenderer`
+  holds GFPGAN between photos, and `MediaPage.leave()` releases it when you
+  switch back to Live (unless a job is running).
+* Batches and video renders hold an `AwakeGuard` activity until they end.
+
 ## Package map (`mirage/`)
 
 | module | owns |
@@ -68,16 +116,23 @@ camera frame:
 | `settings.py` | persisted user settings (JSON) |
 | `library.py` | face library: import photos, thumbnails, cached embeddings |
 | `upstream.py` | configures the upstream engine once (CoreML, 320 px live detector) |
-| `faces_ai.py` | photo → `DetectedFace` with its own 640 px detector; random faces |
+| `faces_ai.py` | photo → `DetectedFace` (embedding, box, gender, age) with its own 640 px detector; random faces |
 | `camera.py` | camera discovery (AVFoundation order, uid → OpenCV index), OBS camera check |
 | `engine.py` | `LiveEngine`: capture, detect and process threads, virtual camera |
 | `tracking.py` | `FaceSmoother`: steadies the face box and keypoints between detections |
-| `power.py` | `AwakeGuard`: keeps the Mac awake while live |
+| `power.py` | `AwakeGuard`: keeps the Mac awake while live, and during batches and video renders |
 | `demo.py` | a fake "Demo" camera (`python -m mirage --demo face.jpg`) |
 | `glass.py` | native Liquid Glass (`NSGlassEffectView`) behind Qt widgets |
 | `i18n.py` | UI strings, English + Russian |
 | `theme.py` | colours, radii, fonts, motion timings (off with Reduce motion), Qt style sheet |
-| `ui/` | main window and widgets |
+| `ui/` | main window and widgets; `media_page.py` (Photos & videos: state, jobs, control bar) and `media_view.py` (its stage) |
+| `media/types.py` | plain data shared by the photo and video pipelines: `TargetFace`, `SourceInfo`, `Plan`, `RenderOptions`, `VideoInfo`, `VideoIdentity`, `VideoProgress` |
+| `media/analyze.py` | every face in a photo: CPU detection at 640 px (+1280 px for small faces), NMS, identity, gender and age, numbered left to right |
+| `media/plan.py` | pure logic: the automatic plan (*This is me*, else the main face), *Give everyone*, suggestions by gender and age |
+| `media/render.py` | `PhotoRenderer`: full-resolution swap, GFPGAN on the swapped faces only, `release()` |
+| `media/photo_io.py` | collect dropped files and folders, load photos upright (HEIC via `sips`), save `<name>-mirage.<ext>` next to the original with EXIF/ICC/DPI |
+| `media/batch.py` | `run_batch()`: the automatic plan over many photos, per-file status, cancel between files |
+| `media/video.py` | ffmpeg lookup and probing, sample frames, `FrameReader` / `FrameWriter`, `IdentityTracker`, `render_video()` |
 
 ### `paths.py`
 
@@ -115,13 +170,19 @@ class Settings:
     language: str = "auto"              # "auto" | "en" | "ru"
     onboarding_done: bool = False
     window_geometry: str | None = None  # base64 of QWidget.saveGeometry()
+    mode: str = "live"                  # "live" | "media" (Photos & videos), restored at launch
+    me_face_id: str | None = None       # library face marked "This is me" (found first in photos)
+    photo_enhance: bool = True          # GFPGAN on swapped faces in photos
+    video_enhance: bool = False         # GPEN-BFR-256 in videos (slow on M1)
 
 def load(path: Path | None = None) -> Settings    # missing/corrupt file → defaults
 def save(settings: Settings, path: Path | None = None) -> None   # atomic write
 ```
 
 Unknown keys are ignored; a value of the wrong type falls back to its
-default, and `opacity` and `sharpness` are clamped to 0..1.
+default, `quality`, `language` and `mode` must be one of their choices, and
+`opacity` and `sharpness` are clamped to 0..1. A `me_face_id` whose face was
+removed is simply ignored.
 
 ### `library.py`
 
@@ -129,6 +190,8 @@ default, and `opacity` and `sharpness` are clamped to 0..1.
 class DetectedFace(NamedTuple):
     embedding: np.ndarray                     # float32, shape (512,)
     bbox: tuple[float, float, float, float]   # x1, y1, x2, y2 in the given image
+    gender: int | None = None                 # 1 = man, 0 = woman (for suggestions)
+    age: float | None = None
 
 Embedder = Callable[[np.ndarray], DetectedFace | None]   # BGR uint8 image in
 
@@ -143,6 +206,8 @@ class FaceEntry:
     image: str       # file name inside the library dir
     thumb: str
     embedding: str
+    gender: int | None = None   # for suggestions in Photos & videos
+    age: float | None = None
 
 class FaceLibrary:
     def __init__(self, root: Path, embedder: Embedder): ...
@@ -152,6 +217,7 @@ class FaceLibrary:
     def add_image(self, image: np.ndarray, name: str) -> FaceEntry
     def remove(self, face_id: str) -> None
     def rename(self, face_id: str, name: str) -> None
+    def set_attributes(self, face_id: str, gender: int | None, age: float | None) -> None
     def move(self, face_id: str, index: int) -> None
     def embedding(self, face_id: str) -> np.ndarray     # cached in memory
     def image_path(self, face_id: str) -> Path
@@ -170,6 +236,9 @@ class FaceLibrary:
 * Photos are detected on a copy capped at 2048 px; HEIC and other formats
   OpenCV can't read go through macOS `sips`.
 * Default name for `add_file` is the file stem, prettified.
+* `gender` and `age` are optional in `index.json`: faces imported before
+  Photos & videos (or rebuilt from files) have none, and the mode fills them
+  in later with `set_attributes()`. Out-of-range values are dropped.
 
 Switching faces is instant because the engine only needs the cached
 512-float embedding, not a new detection.
@@ -192,8 +261,9 @@ of about 26 ms at 640.
 CPU (`det_10g.onnx` from `buffalo_l`), not the live one: photos can have
 small faces, and an import can afford about 100 ms. It takes the largest
 face, retries with a dark border (30 %, 60 %) for close-ups, gets the
-embedding from the upstream recognition model and maps the box back to the
-original image coordinates. `fetch_random_face()` downloads a generated face
+embedding from the upstream recognition model, estimates gender and age with
+`genderage.onnx` on the CPU (used for suggestions in Photos & videos) and
+maps the box back to the original image coordinates. `fetch_random_face()` downloads a generated face
 from thispersondoesnotexist.com.
 
 ### `camera.py`
@@ -276,9 +346,13 @@ Native view order inside the window frame (bottom → top):
 ## Design rules
 
 * One window. Stage (video) left, glass sidebar right, glass control bar
-  under the stage. One primary action: **Start / Stop**.
+  under the stage. One primary action: **Start / Stop** in Live; in
+  Photos & videos, one button that always shows the next step (**Swap**,
+  **Save**, **Make video**, …).
 * Faces are big round thumbnails; click or press `1`–`9` to switch, `0` for
-  the real face. Drag photos in to add them.
+  the real face. Drag photos onto the sidebar to add them.
+* Original photos and videos are only ever read; results go next to them
+  under a new name.
 * Every state has words: *Loading models…*, *Starting camera…*,
   *Live · 14 fps*, *Stopping…*, *Models didn't load*, *Looking for your
   face…*, *Nothing is reaching OBS Virtual Camera*.
@@ -289,4 +363,8 @@ Native view order inside the window frame (bottom → top):
 
 `tests/mirage/` must run without models, camera, network or a display:
 settings round-trip, library with a fake embedder, `order_devices`, the
-virtual-camera frame fit, i18n key parity, landmark smoothing.
+virtual-camera frame fit, i18n key parity, landmark smoothing, the media
+plan and suggestions, the batch runner with fakes, photo loading and saving
+(orientation, HEIC, EXIF, naming), and the video reader, writer, tracker and
+render with fake models. The video tests that need ffmpeg are skipped when
+it isn't installed.

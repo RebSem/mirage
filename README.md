@@ -13,7 +13,8 @@
 
 Mirage is a small macOS app for real-time face swapping. Pick a photo, press
 **Start**, and in Zoom or Meet you show up as your friend (who said yes), a
-generated stranger, or yourself again with one key.
+generated stranger, or yourself again with one key. It can also swap faces
+in the photos and videos you already have.
 
 It is a hobby project: a nicer, macOS-native frontend with Apple's Liquid Glass
 look, built on top of the excellent open-source
@@ -24,21 +25,25 @@ camera plumbing, and a pile of stability fixes.
 
 > [!IMPORTANT]
 > **Consent first.** Only use someone else's face if they are fine with it, and
-> tell people in the call when it is a joke. Mirage is for personal,
-> non-commercial fun: the face models it relies on are licensed for
-> non-commercial use only. Please read [Responsible use](docs/RESPONSIBLE_USE.md)
-> (it is short).
+> tell people in the call (or whoever sees a swapped photo or video) that it
+> is a joke. Mirage is for personal, non-commercial fun: the face models it
+> relies on are licensed for non-commercial use only. Please read
+> [Responsible use](docs/RESPONSIBLE_USE.md) (it is short).
 
 ## What it does
 
 - **One window, Liquid Glass.** A live preview stage and one big Start/Stop
   button. The stage, the sidebar and the control bar sit on native macOS
   glass (`NSGlassEffectView`) that refracts a soft glow of your own video.
-- **A face library.** Drag photos onto the window (iPhone HEIC photos work
+- **A face library.** Drag photos onto the sidebar (iPhone HEIC photos work
   too). Faces show up as big round thumbnails. Click one or press `1`–`9` to
   switch instantly (the face embeddings are cached, so nothing has to be
   detected again). `0` (the *Me* tile) gives you your real face back, 🎲 gives
   you a random generated one.
+- **Photos and videos too.** Switch to **Photos & videos** in the title bar and
+  drop in a photo, a whole folder or a video. Mirage finds the faces, swaps
+  you (or the main face) at full resolution and saves the result next to the
+  original. See [Photos & videos](#photos--videos).
 - **Simple controls** in the *Look* section. Quality presets
   **Fast / Balanced / Best** (Best adds face enhancement), *Keep my mouth*
   (your real mouth stays in the picture, so talking looks natural), a blend
@@ -65,8 +70,9 @@ camera plumbing, and a pile of stability fixes.
 |---|---|
 | macOS | 14 or newer recommended. The Liquid Glass look needs macOS 26+; older versions get a plain dark window. |
 | Mac | Apple Silicon (M1 or newer) is required; the installer stops on Intel Macs. |
-| Disk | About 4 GB free (Python environment and models). |
+| Disk | About 4 GB free (Python environment and models), plus about 1 GB for Photos & videos (ffmpeg, and the photo face enhancer, downloaded the first time you use it). |
 | Tools | [Homebrew](https://brew.sh) and the Xcode Command Line Tools (`xcode-select --install`). |
+| Videos | [ffmpeg](https://ffmpeg.org), which `make install` installs with Homebrew. Photos and Live work without it. |
 | Virtual camera | [OBS Studio](https://obsproject.com) (free). Mirage only borrows its virtual camera; no scenes or sources to set up. |
 
 ## Install
@@ -77,10 +83,10 @@ cd mirage
 make install
 ```
 
-`make install` runs `scripts/install.sh`: it installs Python 3.14 with
-Homebrew (if you don't have it yet), creates a virtual environment, installs
-the Python packages, downloads the models and offers to install OBS. It is
-safe to run again; finished steps are skipped.
+`make install` runs `scripts/install.sh`: it installs Python 3.14 and ffmpeg
+with Homebrew (if you don't have them yet), creates a virtual environment,
+installs the Python packages, downloads the models and offers to install
+OBS. It is safe to run again; finished steps are skipped.
 
 The **Best** preset adds a face enhancer, GPEN-BFR-256 (about 75 MB). Mirage
 downloads it the first time you choose Best; to get it ahead of time, run
@@ -123,14 +129,67 @@ app can feed the virtual camera. If Zoom shows the OBS logo instead of you,
 Mirage is not live yet, or its frames are not getting through (see
 [Troubleshooting](docs/TROUBLESHOOTING.md#zoom-shows-the-obs-logo-or-a-black-picture)).
 
+## Photos & videos
+
+Mirage can also swap faces in photos and videos you already have. Click
+**Photos & videos** at the top of the window (**Live** takes you back; a call
+in progress keeps going, with fewer frames per second while Mirage works on a
+file). Your faces and the *Look* settings on the right work in both modes.
+
+1. **Open** photos or a video: click **Open…**, press `⌘⇧O`, or drag files
+   or a folder onto the stage. Photos dropped on the sidebar are added to your
+   faces instead.
+2. **Check who gets swapped.** Every face gets a numbered outline, and the
+   face selected on the right goes to one person: you, if one of your faces is
+   marked **This is me** (right-click it) and you are in the picture;
+   otherwise the main face, that is the largest one (or, of two about the same
+   size, the one nearer the centre). Everyone else is left as is. A solid
+   outline means *will be swapped*, a dashed one *left as is*.
+3. **Change it with a click.** Click a face in the picture to choose who it
+   becomes, or *Leave as is*. The most natural-looking choices (same gender,
+   similar age) come first, and ★ marks a good match. **Give everyone the
+   selected face** (the button with two people) swaps them all.
+4. **Swap**, then **Save** (`⌘S`); the big button always shows the next step.
+   Hold the compare button (or `Space`) to see the original.
+
+The result is saved next to the original as `name-mirage.jpg` (in the
+original's format; iPhone HEIC photos become JPEG). The original is never
+changed or overwritten: if the name is taken, you get `name-mirage-2.jpg`.
+EXIF data such as the date and the place is kept.
+
+**Many photos at once.** Drop several photos or a folder, then press
+**Swap in N photos**. Each photo gets the automatic choice from step 2 and
+is saved next to its original. Photos without a face are marked *No face*;
+**Cancel** stops after the current photo.
+
+**Videos.** Open a video (MP4, MOV, M4V, MKV, AVI or WebM), check who gets
+swapped on the frame Mirage shows, and press **Make video**. You see the
+progress and the time left; **Cancel** deletes the unfinished file. The
+result, `name-mirage.mp4`, keeps the original sound and frame rate, and
+iPhone HDR videos come out in standard (SDR) colour. People are followed by
+who they are, not where they are, so the right face stays on the right
+person. A 720p video renders at about 13–14 frames per second on a MacBook
+Air M1. Videos need ffmpeg, which `make install` installs.
+
+**Enhance faces** restores detail on the swapped faces. For photos it is on
+by default, and a swap with it takes about half a second per face (its model,
+GFPGAN, is downloaded the first time). For videos it is much slower, so it
+starts off.
+
+The details (how Mirage decides, renders and saves) are in
+[docs/MEDIA.md](docs/MEDIA.md).
+
 ## Keyboard shortcuts
 
 | Key | Action |
 |---|---|
-| `Space` | Start / Stop |
-| `1` – `9` | Switch to face 1–9 |
-| `0` | Your real face |
-| `⌘O` | Add photos |
+| `Space` | Start / Stop. In Photos & videos: hold to see the original |
+| `1` – `9` | Switch to face 1–9. In Photos & videos: every face being swapped gets it (or only the face you clicked) |
+| `0` | Your real face. In Photos & videos: swap nobody (or leave the face you clicked as is) |
+| `Esc` | In Photos & videos: deselect the face you clicked |
+| `⌘O` | Add photos to your faces |
+| `⌘⇧O` | Open photos or a video in Photos & videos |
+| `⌘S` | Save the swapped photo |
 | `⌘R` | Random face |
 | `⌘⇧M` | Mirror the preview (the call is never mirrored) |
 | `⌘Q` | Quit |
@@ -148,14 +207,16 @@ More in [Troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## Your data stays on your Mac
 
-All video processing happens locally; your camera feed never leaves the
-machine. The only network use is downloading the models (during install, the
-first time you choose **Best**, or later if one is missing) and fetching a
-generated face from thispersondoesnotexist.com when you press 🎲.
+Everything is processed locally: your camera feed, photos and videos never
+leave the machine. The only network use is downloading the models (during
+install, the first time you choose **Best** or enhance faces in a photo or
+video, or later if one is missing) and fetching a generated face from
+thispersondoesnotexist.com when you press 🎲.
 
 | What | Where |
 |---|---|
 | Faces and settings | `~/Library/Application Support/Mirage` |
+| Swapped photos and videos | next to the originals (`name-mirage.jpg`, `name-mirage.mp4`) |
 | Logs | `~/Library/Logs/Mirage` |
 
 To start from scratch, quit Mirage and delete
@@ -163,8 +224,9 @@ To start from scratch, quit Mirage and delete
 
 ## The classic Deep-Live-Cam UI
 
-The original Deep-Live-Cam window is still here and still works, including the
-things Mirage does not do (image and video files, face mapping):
+The original Deep-Live-Cam window is still here and still works. Mirage now
+swaps faces in photos and videos itself; the classic UI remains for face
+mapping and its own options:
 
 ```bash
 make classic        # or: source venv/bin/activate && python run.py
@@ -175,7 +237,9 @@ Its original README is kept at [docs/upstream/README.md](docs/upstream/README.md
 ## Project docs
 
 - [Troubleshooting](docs/TROUBLESHOOTING.md): camera permission, virtual
-  camera, low fps, install errors, the face library, logs.
+  camera, low fps, photos and videos, install errors, the face library, logs.
+- [Photos & videos](docs/MEDIA.md): who gets swapped, how photos and videos
+  are rendered and saved, speed on an M1.
 - [Responsible use](docs/RESPONSIBLE_USE.md): the ground rules.
 - [Design](docs/DESIGN.md): how the Liquid Glass window is put together.
 - [Architecture](docs/ARCHITECTURE.md): threads, modules, file layout.
@@ -199,9 +263,11 @@ live.
 - [InsightFace](https://github.com/deepinsight/insightface) for face detection,
   recognition and the swap model.
 - [GPEN](https://github.com/yangxy/GPEN) for the face enhancement in **Best**
-  (GPEN-BFR-256, converted to ONNX by
-  [Face-Upscalers-ONNX](https://github.com/harisreedhar/Face-Upscalers-ONNX));
-  the classic UI also offers [GFPGAN](https://github.com/TencentARC/GFPGAN).
+  and in videos (GPEN-BFR-256, converted to ONNX by
+  [Face-Upscalers-ONNX](https://github.com/harisreedhar/Face-Upscalers-ONNX)).
+- [GFPGAN](https://github.com/TencentARC/GFPGAN) for the face enhancement in
+  photos.
+- [FFmpeg](https://ffmpeg.org) for reading and writing videos.
 - [This Person Does Not Exist](https://thispersondoesnotexist.com) for the
   generated faces behind 🎲.
 - [OBS Studio](https://obsproject.com) and

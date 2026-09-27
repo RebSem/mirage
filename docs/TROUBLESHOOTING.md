@@ -14,6 +14,14 @@ attached is the fastest way to get help.
 - [“Looking for your face…” while live](#looking-for-your-face-while-live)
 - [The wrong camera is used](#the-wrong-camera-is-used)
 - [Face names reset to “Face”](#face-names-reset-to-face)
+- [Photos & videos](#photos--videos): [ffmpeg](#videos-need-ffmpeg),
+  [no faces found](#no-faces-found-here),
+  [the wrong person swapped](#the-wrong-person-got-swapped),
+  [the first photo is slow](#the-first-photo-takes-a-while),
+  [slow videos](#making-a-video-is-slow-or-the-mac-gets-warm),
+  [washed-out videos](#the-video-looks-washed-out),
+  [no sound](#the-video-has-no-sound),
+  [where the results are](#where-are-my-results)
 - [Install problems](#install-problems)
 - [Where the logs are](#where-the-logs-are)
 - [Reset or uninstall](#reset-or-uninstall)
@@ -105,9 +113,14 @@ you get less:
   anything exporting video.
 - Let it breathe. The MacBook Air has no fan and slows down when it gets hot;
   keep it on a hard surface, not a blanket or your lap.
+- Don't make a video or run a batch in **Photos & videos** during a call:
+  both use the Neural Engine, so the call gets fewer fps while they run.
 - Turn on *Show FPS* (under **More**) to see the effect of each change.
 
 ## “No face found” in a photo
+
+This is about adding a face to your gallery. For photos opened in
+**Photos & videos**, see [“No faces found here”](#no-faces-found-here).
 
 Mirage needs a clear face in each photo you add (if there are several, it
 takes the largest). Use a photo that is:
@@ -154,6 +167,113 @@ from it.
 
 If the saved data of a single face is damaged, Mirage shows your real face
 instead and tells you; remove that face and add its photo again.
+
+## Photos & videos
+
+How the mode decides and saves is described in [MEDIA.md](MEDIA.md).
+
+### “Videos need ffmpeg”
+
+Mirage reads and writes videos with ffmpeg. `make install` installs it with
+Homebrew; if that step was skipped or failed, run `make install` again or
+install it yourself:
+
+```bash
+brew install ffmpeg
+```
+
+There is no need to restart Mirage: it looks for ffmpeg every time you open
+a video, in Homebrew's folders as well as on your `PATH`. Photos and Live
+work without ffmpeg.
+
+### “No faces found here”
+
+Mirage searched the whole photo and found no face. It finds faces that are:
+
+- **big enough**: a tiny face in a wide group shot can be missed. On large
+  photos Mirage takes a second, closer look for small faces, so the
+  full-size original works better than a shrunk copy (for example one saved
+  from a messenger). Try a bigger photo;
+- **turned towards the camera**: profiles and strongly angled faces are hard
+  to find;
+- **uncovered**: no sunglasses, masks or hands over the face.
+
+For a video, Mirage looks for faces in 8 frames spread over the clip and
+shows the best one. If nobody faces the camera in any of them, trim the clip
+to the part where people are clearly visible.
+
+### The wrong person got swapped
+
+By default Mirage swaps you, if one of your faces is marked **This is me**
+and you are in the picture; otherwise the largest face (of two about the
+same size, the one nearer the centre). To change that:
+
+- **Click a face in the picture** and pick who it becomes; pick
+  **Leave as is** for anyone who should stay as they are.
+- **Mark yourself.** Right-click your own face in the gallery on the right
+  and choose **This is me**. From then on Mirage looks for you first in
+  photos, batches and videos. If it still misses you (very different light,
+  angle or age), add a clearer photo of yourself and mark that one.
+- **Batches** always use the automatic choice. To fix single photos, open
+  them one at a time.
+- **Videos** follow people by their faces, starting from the frame Mirage
+  shows. People who look very much alike, or faces that are small or turned
+  away, can still be mixed up in places.
+
+### The first photo takes a while
+
+The first time you open a photo, finding faces takes about 10 seconds while
+the models load, and the first **Swap** another 4–7 seconds while the face
+enhancer (GFPGAN) loads. The very first time, the enhancer is also
+downloaded (about 370 MB). After that, finding faces takes well under a
+second, and swapping about half a second per face on a MacBook Air M1.
+Switching back to **Live** frees the enhancer's memory, so the next swap
+after that loads it again.
+
+### Making a video is slow, or the Mac gets warm
+
+That is expected: every face in every frame goes through the swap model. On
+a MacBook Air M1, a 720p video with one face renders at about 13–14 frames
+per second (a one-minute clip at 30 fps takes a bit over two minutes), and
+with two people at about 10. To go faster:
+
+- Plug in the charger. A fanless Air slows down as it heats up; the time
+  left adjusts as it goes.
+- Stop **Live**. A call and a render share the Neural Engine, so both get
+  slower.
+- Leave **Enhance faces (slower)** off for videos.
+- Close other heavy apps.
+
+The Mac stays awake while a video renders, so you can leave it running, and
+it is normal for it to get warm.
+
+### The video looks washed out
+
+iPhone videos are usually HDR. Mirage converts them to standard (SDR) colour
+on the Mac's video hardware (VideoToolbox). If that conversion can't be used
+for a file, Mirage falls back to plain decoding and the result looks pale and
+flat. Please [open an issue](https://github.com/RebSem/mirage/issues/new/choose)
+with the [log](#where-the-logs-are) attached and, if you can, say which phone
+or camera recorded the clip.
+
+### The video has no sound
+
+Mirage copies the original's sound, or converts it to AAC when an MP4 file
+can't hold it as it is. If even that fails, the video is saved without sound
+and the [log](#where-the-logs-are) says why. Check that the original has
+sound in the first place.
+
+### Where are my results?
+
+Next to the originals, in the same folder: `name-mirage.jpg` for a photo (in
+the original's format; HEIC becomes JPEG) and `name-mirage.mp4` for a video,
+with `-2`, `-3` and so on if you swap the same file again. **Show in Finder**
+selects the file. Originals are never modified or overwritten.
+
+A single photo is saved only when you press **Save** (`⌘S`); a batch and a
+video save each result as soon as it is ready. If saving fails (for
+example, the folder is on a read-only disk), copy the originals to a folder
+you can write to, such as *Pictures*, and try again.
 
 ## Install problems
 
@@ -238,5 +358,6 @@ rm -rf ~/Library/Application\ Support/Mirage
 2. Delete the `mirage` folder you cloned (it holds the venv and the models).
 3. Delete `~/Library/Application Support/Mirage` and `~/Library/Logs/Mirage`.
 4. Delete `~/.insightface/models/buffalo_l` (the face detection models).
-5. Optionally, uninstall OBS and turn Mirage off under **System Settings →
-   Privacy & Security → Camera**.
+5. Optionally, uninstall OBS, and ffmpeg too (`brew uninstall ffmpeg`) if
+   nothing else of yours needs it, and turn Mirage off under
+   **System Settings → Privacy & Security → Camera**.
