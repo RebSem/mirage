@@ -165,6 +165,7 @@ def main(argv: list[str] | None = None) -> int:
             settings_mod.save(window.save_state())
         except Exception:
             log.exception("could not save settings")
+        window.media.shutdown()  # cancel a running render; a video deletes its partial file
         engine.shutdown()
         server.close()
 

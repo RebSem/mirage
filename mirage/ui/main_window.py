@@ -454,12 +454,13 @@ class MainWindow(QWidget):
             self.random_face()
             return
         chosen = None if face_id == ME else face_id
-        if self.mode == MEDIA and self.media.view.active is not None:
-            self.media.pick_library(chosen)  # assign to the face clicked in the photo only
+        if self.mode == MEDIA:
+            # Photos & videos keeps its own selection: editing files never
+            # changes (or turns off) the face in a running call.
+            if not self.media.pick_library(chosen):
+                self.grid.set_selected(self.media.selected_id)
             return
         self._select_face(chosen)
-        if self.mode == MEDIA:
-            self.media.pick_library(self.settings.face_id)
 
     def _select_by_number(self, n: int) -> None:
         entries = self.library.list()
@@ -544,6 +545,9 @@ class MainWindow(QWidget):
         if box.clickedButton() is not remove_btn:
             return
         self.library.remove(face_id)
+        self.media.on_face_removed(face_id)
+        if self.settings.me_face_id == face_id:
+            self._set("me_face_id", None)
         if self.settings.face_id == face_id:
             self._select_face(None)
         self._reload_faces()
@@ -552,7 +556,7 @@ class MainWindow(QWidget):
     def add_photos(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
             self, tr("file_dialog_title"), str(Path.home() / "Pictures"),
-            tr("file_filter_images") + " (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.tif *.tiff)",
+            tr("file_filter_images") + " (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.heif *.tif *.tiff)",
         )
         if files:
             self._import([Path(f) for f in files])
@@ -590,10 +594,10 @@ class MainWindow(QWidget):
                 self.toast(tr("toast_import_failed", name=payload), "error")
         if len(added) == 1:
             self.toast(tr("toast_added", name=added[0].name))
-            self._select_face(added[0].id)
+            self._on_tile(added[0].id)
         elif len(added) > 1:
             self.toast(tr("toast_added_many", n=len(added)))
-            self._select_face(added[-1].id)
+            self._on_tile(added[-1].id)
 
     def random_face(self) -> None:
         self._busy_imports += 1
@@ -626,7 +630,7 @@ class MainWindow(QWidget):
             self.toast(tr("toast_random_failed") if error == "network"
                        else tr("toast_import_failed", name=tr("random_face")), "warn")
         else:
-            self._select_face(entry.id)
+            self._on_tile(entry.id)
 
     # ── drag & drop ──────────────────────────────────────────────────────
 
@@ -638,8 +642,8 @@ class MainWindow(QWidget):
         """Sidebar → new faces for the gallery; anywhere else → Photos & videos
         (in Live, only videos and folders go there; photos become faces)."""
         over_sidebar = self.sidebar.geometry().contains(self.sidebar.parentWidget().mapFrom(self, event.position().toPoint()))
-        if over_sidebar:
-            return False
+        if over_sidebar:  # faces go to the gallery; videos and folders can't be faces
+            return any(f.is_dir() or f.suffix.lower() in VIDEO_SUFFIXES for f in files)
         if self.mode == MEDIA:
             return True
         return any(f.is_dir() or f.suffix.lower() in VIDEO_SUFFIXES for f in files)
@@ -689,6 +693,7 @@ class MainWindow(QWidget):
         if mode == LIVE:
             self.media.leave()
         self.pages.setCurrentWidget(self.media if mode == MEDIA else self.pages.widget(0))
+        self.grid.set_selected(self.media.selected_id if mode == MEDIA else self.settings.face_id)
         self.mode_switch.set_value(mode, animate=False)
         self._space.setEnabled(mode == LIVE)  # in Photos & videos Space means "hold to compare"
         self.toasts.sync_geometry()

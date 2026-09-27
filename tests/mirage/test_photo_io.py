@@ -466,3 +466,12 @@ def test_heic_without_sips_is_not_an_image(tmp_path: Path, monkeypatch: pytest.M
     src.write_bytes(b"\x00\x00\x00\x18ftypheic")
     with pytest.raises(ValueError, match="not an image"):
         load_image(src)
+
+
+def test_saved_photo_is_marked_as_face_swapped(tmp_path: Path) -> None:
+    src = tmp_path / "plain.jpg"
+    Image.new("RGB", (40, 30), (10, 20, 30)).save(src, "JPEG")
+    image, meta = photo_io.load_image(src)
+    out = photo_io.save_image(image, src, meta)
+    exif = Image.open(out).getexif()
+    assert "Mirage" in str(exif.get(0x0131)) and "swapped" in str(exif.get(0x010E))

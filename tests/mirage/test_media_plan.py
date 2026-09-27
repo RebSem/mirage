@@ -80,3 +80,8 @@ def test_suggestions_prefer_same_gender_then_close_age():
 def test_cosine_handles_zero_vectors():
     assert cosine(np.zeros(4), np.ones(4)) == 0.0
     assert abs(cosine(np.ones(4), np.ones(4)) - 1.0) < 1e-6
+
+
+def test_wearing_your_own_face_skips_find_me():
+    faces = number_left_to_right([face(50, 50, 300, unit(0)), face(600, 200, 100, unit(1))])
+    assert auto_plan(faces, (W, H), "me", me_embedding=unit(1), selected_is_me=True) == {1: "me", 2: None}

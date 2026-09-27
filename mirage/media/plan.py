@@ -50,12 +50,13 @@ def find_me(targets: list[TargetFace], me_embedding: np.ndarray | None) -> int |
 
 
 def auto_plan(targets: list[TargetFace], image_size: tuple[int, int], selected_id: str | None,
-              me_embedding: np.ndarray | None = None) -> Plan:
+              me_embedding: np.ndarray | None = None, selected_is_me: bool = False) -> Plan:
     """Swap you if you're in the picture, else the main face; leave everyone else alone."""
     plan: Plan = {t.index: None for t in targets}
     if selected_id is None or not targets:
         return plan
-    chosen = find_me(targets, me_embedding)
+    # Wearing your own face: "find me" would swap you onto yourself.
+    chosen = None if selected_is_me else find_me(targets, me_embedding)
     if chosen is None:
         chosen = main_face(targets, image_size)
     if chosen is not None:

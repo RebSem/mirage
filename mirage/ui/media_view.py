@@ -66,6 +66,7 @@ class MediaView(QWidget):
         self.badge = ""                        # small chip at the top-left, e.g. "Original" / "Swapped"
         self.rows: list[BatchRow] = []
         self.batch_title = ""
+        self._scroll = 0
         self._hover: int | None = None
         self._spin = 0.0
         self._spinner = QTimer(self)
@@ -162,6 +163,11 @@ class MediaView(QWidget):
         if hit != self._hover:
             self._hover = hit
             self.setCursor(Qt.CursorShape.PointingHandCursor if hit else Qt.CursorShape.ArrowCursor)
+            self.update()
+
+    def wheelEvent(self, e) -> None:  # noqa: N802
+        if self.mode == "batch" and self.rows:
+            self._scroll = max(0, self._scroll - int(e.angleDelta().y() / 40))
             self.update()
 
     def leaveEvent(self, e) -> None:  # noqa: N802
@@ -323,9 +329,11 @@ class MediaView(QWidget):
         row_h = 54.0
         visible = int((area.height() - 80) // row_h)
         rows = self.rows
-        # keep the row being worked on in view
-        working = next((i for i, r in enumerate(rows) if r.status == "working"), 0)
-        first = max(0, min(working - visible // 2, len(rows) - visible))
+        # keep the row being worked on in view; otherwise the wheel scrolls
+        working = next((i for i, r in enumerate(rows) if r.status == "working"), None)
+        target = working - visible // 2 if working is not None else self._scroll
+        first = max(0, min(target, len(rows) - visible))
+        self._scroll = first
         for i, row in enumerate(rows[first:first + visible]):
             y = top + i * row_h
             box = QRectF(area.left() + 24, y, area.width() - 48, row_h - 8)

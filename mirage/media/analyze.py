@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import threading
 
+import cv2
 import numpy as np
 
 from mirage.media.plan import number_left_to_right
@@ -66,6 +67,18 @@ def detect_faces(image: np.ndarray) -> list[tuple[np.ndarray, np.ndarray]]:
         if max(h, w) > 1400 and (not dets or smallest < SMALL_FACE):
             b2, k2 = detector.detect(image, input_size=(1280, 1280), max_num=0, metric="default")
             dets += [(b2[i], k2[i]) for i in range(b2.shape[0])]
+        # Close-ups (a face filling the frame) defeat the detector; a black
+        # border makes the face smaller relative to the input, as on import.
+        for ratio in (0.3, 0.6):
+            if dets:
+                break
+            pad = int(max(h, w) * ratio)
+            padded = cv2.copyMakeBorder(image, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+            b3, k3 = detector.detect(padded, max_num=0, metric="default")
+            for i in range(b3.shape[0]):
+                box = b3[i].copy()
+                box[:4] -= pad
+                dets.append((box, k3[i] - pad))
     return _merge(dets)
 
 

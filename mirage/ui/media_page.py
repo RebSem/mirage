@@ -41,15 +41,10 @@ def _round_pixmap(path: Path, size: int) -> QPixmap | None:
     return out
 
 
-def _file_thumb(path: Path, size: int = 72) -> QPixmap | None:
-    reader = QImageReader(str(path))
-    reader.setAutoTransform(True)
-    original = reader.size()
-    if original.isValid() and original.width() > 0:
-        scale = size / max(1, min(original.width(), original.height()))
-        reader.setScaledSize(QSize(max(1, int(original.width() * scale)), max(1, int(original.height() * scale))))
-    image = reader.read()
-    return QPixmap.fromImage(image) if not image.isNull() else None
+def _gfpgan_present() -> bool:
+    from mirage.paths import models_dir
+
+    return (models_dir() / "gfpgan-1024.onnx").exists()
 
 
 def _fmt_eta(seconds: float | None) -> str:
@@ -64,6 +59,7 @@ class MediaPage(QWidget):
     _rendered = Signal(object)
     _saved = Signal(object)
     _batchUpdate = Signal(object)
+    _thumbs = Signal(object)
     _batchDone = Signal(object)
     _videoProgress = Signal(object)
     _videoDone = Signal(object)
@@ -87,6 +83,12 @@ class MediaPage(QWidget):
         self._renderer = None
         self._attrs_checked: set[str] = set()
         self._live_warned = False
+        self._enhance_warned = False
+        self._job: threading.Thread | None = None
+        self._release_when_idle = False
+        # The face to wear in this mode. Separate from Live's, so editing
+        # photos never changes (or turns off) the face in a running call.
+        self.selected_id: str | None = window.settings.face_id
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -136,6 +138,7 @@ class MediaPage(QWidget):
         self._rendered.connect(self._on_rendered)
         self._saved.connect(self._on_saved)
         self._batchUpdate.connect(self._on_batch_update)
+        self._thumbs.connect(self._on_thumbs)
         self._batchDone.connect(self._on_batch_done)
         self._videoProgress.connect(self._on_video_progress)
         self._videoDone.connect(self._on_video_done)
@@ -160,6 +163,16 @@ class MediaPage(QWidget):
 
             self._renderer = PhotoRenderer()
         return self._renderer
+
+    def _run(self, target, name: str) -> None:
+        self._job = threading.Thread(target=target, name=name, daemon=True)
+        self._job.start()
+
+    def _selected_is_me(self) -> bool:
+        return bool(self.selected_id) and self.selected_id == self.settings.me_face_id
+
+    def _auto_plan(self, targets, size) -> Plan:
+        return auto_plan(targets, size, self.selected_id, self._me_embedding(), self._selected_is_me())
 
     def _me_embedding(self) -> np.ndarray | None:
         me = self.settings.me_face_id
@@ -243,8 +256,8 @@ class MediaPage(QWidget):
         from mirage.media import photo_io
         from mirage.media.analyze import analyze_image
 
+        self.kind, self.path, self.video_info, self.targets, self.plan = PHOTO, path, None, [], {}
         token = self._start(tr("media_analyzing"))
-        self.kind, self.path = PHOTO, path
 
         def work() -> None:
             try:
@@ -256,7 +269,7 @@ class MediaPage(QWidget):
                 log.exception("opening %s failed", path)
                 self._analyzed.emit((token, PHOTO, None, None, [], exc))
 
-        threading.Thread(target=work, name="mirage-analyze", daemon=True).start()
+        self._run(work, "mirage-analyze")
 
     def _open_video(self, path: Path) -> None:
         from mirage.media import video
@@ -265,8 +278,8 @@ class MediaPage(QWidget):
         if video.find_ffmpeg() is None:
             self._toast(tr("media_ffmpeg_missing"), "error")
             return
+        self.kind, self.path, self.video_info, self.targets, self.plan = VIDEO, path, None, [], {}
         token = self._start(tr("media_analyzing"))
-        self.kind, self.path = VIDEO, path
 
         def work() -> None:
             try:
@@ -285,7 +298,7 @@ class MediaPage(QWidget):
                 log.exception("opening video %s failed", path)
                 self._analyzed.emit((token, VIDEO, None, None, [], exc))
 
-        threading.Thread(target=work, name="mirage-analyze-video", daemon=True).start()
+        self._run(work, "mirage-analyze-video")
 
     def _open_batch(self, paths: list[Path]) -> None:
         from mirage.media.batch import BatchItem
@@ -295,15 +308,43 @@ class MediaPage(QWidget):
         self.batch_items = [BatchItem(p) for p in paths]
         self.busy = False
         self.view.clear_busy()
-        rows = [BatchRow(p.name, "waiting", _file_thumb(p) if i < 200 else None) for i, p in enumerate(paths)]
+        rows = [BatchRow(p.name, "waiting") for p in paths]
         self.view.show_batch(tr("media_batch_ready", n=len(paths)), rows)
         self._refresh()
+        token = self._token
+
+        def load_thumbs() -> None:
+            from PySide6.QtGui import QImage
+
+            thumbs = {}
+            for i, p in enumerate(paths[:300]):
+                reader = QImageReader(str(p))
+                reader.setAutoTransform(True)
+                size = reader.size()
+                if size.isValid() and size.width() > 0:
+                    scale = 72 / max(1, min(size.width(), size.height()))
+                    reader.setScaledSize(QSize(max(1, int(size.width() * scale)), max(1, int(size.height() * scale))))
+                image: QImage = reader.read()
+                if not image.isNull():
+                    thumbs[i] = image
+            self._thumbs.emit((token, thumbs))
+
+        threading.Thread(target=load_thumbs, name="mirage-thumbs", daemon=True).start()
+
+    def _on_thumbs(self, payload) -> None:
+        token, thumbs = payload
+        if token != self._token or self.kind != BATCH:
+            return
+        for i, image in thumbs.items():
+            if i < len(self.view.rows):
+                self.view.rows[i].thumb = QPixmap.fromImage(image)
+        self.view.update()
 
     def _on_analyzed(self, payload) -> None:
         token, kind, image, extra, targets, error = payload
         if token != self._token:
             return
-        self.busy = False
+        self._job_finished()
         self.view.clear_busy()
         if error is not None or image is None:
             name = self.path.name if self.path else ""
@@ -322,7 +363,7 @@ class MediaPage(QWidget):
         self.view.set_original(image)
         if not targets:
             self._toast(tr("media_no_faces"), "warn")
-        self.plan = auto_plan(targets, (image.shape[1], image.shape[0]), self.settings.face_id, self._me_embedding())
+        self.plan = self._auto_plan(targets, (image.shape[1], image.shape[0]))
         if targets and not assigned_count(self.plan):
             self._toast(tr("media_pick_face"), "info")
         self._relabel()
@@ -342,12 +383,18 @@ class MediaPage(QWidget):
         self.view.set_faces(self.targets, labels)
 
     def _plan_changed(self) -> None:
-        if self.result is not None:  # the rendered picture no longer matches the plan
-            self.result, self.saved_path = None, None
-            self.view.show_image(self.image, original=self.image)
-            self.view.badge = ""
+        self._invalidate_output()
         self._relabel()
         self._refresh()
+
+    def _invalidate_output(self) -> None:
+        """The rendered photo / saved video no longer matches what the user asked for."""
+        if self.result is not None:
+            self.result = None
+            self.view.show_image(self.image, original=self.image)
+            self.view.badge = ""
+        if self.kind in (PHOTO, VIDEO):
+            self.saved_path = None
 
     def assign(self, index: int, source_id: str | None) -> None:
         if self.busy or index not in self.plan:
@@ -358,31 +405,42 @@ class MediaPage(QWidget):
     def assign_everyone(self) -> None:
         if self.busy or self.kind not in (PHOTO, VIDEO) or not self.targets:
             return
-        if not self.settings.face_id:
+        if not self.selected_id:
             self._toast(tr("media_pick_face"), "info")
             return
-        self.plan = swap_everyone(self.targets, self.settings.face_id)
+        self.plan = swap_everyone(self.targets, self.selected_id)
         self._plan_changed()
 
     def clear_active(self) -> None:
         self.view.active = None
         self.view.update()
 
-    def pick_library(self, face_id: str | None) -> None:
-        """A gallery click (or 0–9) while this mode is shown."""
-        if self.busy or self.kind not in (PHOTO, VIDEO) or not self.targets:
-            return
-        if self.view.active is not None:
+    def pick_library(self, face_id: str | None) -> bool:
+        """A gallery click (or 0–9) while this mode is shown. Returns True if it
+        went to the face highlighted in the photo (the selection didn't change)."""
+        if self.view.active is not None and self.kind in (PHOTO, VIDEO) and not self.busy:
             self.assign(self.view.active, face_id)
-            return
+            return True
+        self.selected_id = face_id
+        if self.busy or self.kind not in (PHOTO, VIDEO) or not self.targets:
+            return False
         if face_id is None:
             self.plan = {t.index: None for t in self.targets}
         elif assigned_count(self.plan):
             self.plan = {i: (face_id if v else None) for i, v in self.plan.items()}
         else:
-            self.plan = auto_plan(self.targets, (self.image.shape[1], self.image.shape[0]), face_id,
-                                  self._me_embedding())
+            self.plan = self._auto_plan(self.targets, (self.image.shape[1], self.image.shape[0]))
         self._plan_changed()
+        return False
+
+    def on_face_removed(self, face_id: str) -> None:
+        """A library face was deleted: drop it from the plan and the selection."""
+        if self.selected_id == face_id:
+            self.selected_id = None
+        if any(v == face_id for v in self.plan.values()):
+            self.plan = {i: (None if v == face_id else v) for i, v in self.plan.items()}
+            if not self.busy:
+                self._plan_changed()
 
     def _on_face_clicked(self, index: int, pos: QPointF) -> None:
         target = next((t for t in self.targets if t.index == index), None)
@@ -412,8 +470,11 @@ class MediaPage(QWidget):
             act.setChecked(self.plan.get(index) == source.id)
             act.triggered.connect(lambda _c=False, sid=source.id: self.assign(index, sid))
             menu.addAction(act)
-        menu.exec(pos.toPoint())
-        self.clear_active()
+        chosen = menu.exec(pos.toPoint())
+        if chosen is not None:
+            self.clear_active()
+        # Dismissed without a choice: the face stays highlighted, so a gallery
+        # click or 1–9 assigns to it (Esc or a click elsewhere clears it).
 
     # ── actions ──────────────────────────────────────────────────────────
 
@@ -430,10 +491,12 @@ class MediaPage(QWidget):
         elif self.kind == BATCH:
             if self.busy:
                 self._cancel.set()
-            elif all(i.status == "waiting" for i in self.batch_items):
+            elif any(i.status == "waiting" for i in self.batch_items):
                 self.run_batch()
-            else:
+            elif any(i.output for i in self.batch_items):
                 self.reveal()
+            else:
+                self.open_dialog()
         elif self.kind == VIDEO:
             if self.busy:
                 self._cancel.set()
@@ -456,14 +519,21 @@ class MediaPage(QWidget):
         if not assigned_count(self.plan):
             self._toast(tr("media_pick_face"), "info")
             return
+        try:
+            embeddings = self._embeddings(self.plan.values())
+        except Exception as exc:
+            log.exception("could not load face embeddings")
+            self._toast(tr("media_failed", name=self.path.name if self.path else "", error=exc), "error")
+            return
         self._warn_if_live()
         token = self._token
         self.busy = True
-        self.view.set_busy(tr("media_rendering"))
+        enhance = self.settings.photo_enhance
+        self.view.set_busy(tr("media_downloading_enhancer") if enhance and not _gfpgan_present()
+                           else tr("media_rendering"))
         self._refresh()
         image, targets, plan = self.image, list(self.targets), dict(self.plan)
-        options = RenderOptions(enhance=self.settings.photo_enhance)
-        embeddings = self._embeddings(plan.values())
+        options = RenderOptions(enhance=enhance)
         renderer = self._renderer_obj()
 
         def work() -> None:
@@ -473,14 +543,17 @@ class MediaPage(QWidget):
                 log.exception("photo render failed")
                 self._rendered.emit((token, None, exc))
 
-        threading.Thread(target=work, name="mirage-render", daemon=True).start()
+        self._run(work, "mirage-render")
 
     def _on_rendered(self, payload) -> None:
         token, result, error = payload
         if token != self._token:
             return
-        self.busy = False
+        self._job_finished()
         self.view.clear_busy()
+        if self._renderer is not None and self._renderer.enhance_failed and not self._enhance_warned:
+            self._enhance_warned = True
+            self._toast(tr("media_enhance_failed"), "warn")
         if error is not None:
             self._toast(tr("media_failed", name=self.path.name if self.path else "", error=error), "error")
         else:
@@ -491,6 +564,9 @@ class MediaPage(QWidget):
 
     def save(self) -> None:
         if self.result is None or self.path is None or self.busy:
+            return
+        if self.saved_path is not None:  # ⌘S again: don't write -mirage-2, -mirage-3…
+            self._toast(tr("media_saved", name=Path(self.saved_path).name))
             return
         from mirage.media import photo_io
 
@@ -506,13 +582,13 @@ class MediaPage(QWidget):
                 log.exception("saving failed")
                 self._saved.emit((token, None, exc))
 
-        threading.Thread(target=work, name="mirage-save", daemon=True).start()
+        self._run(work, "mirage-save")
 
     def _on_saved(self, payload) -> None:
         token, out, error = payload
         if token != self._token:
             return
-        self.busy = False
+        self._job_finished()
         if error is not None:
             self._toast(tr("media_failed", name=self.path.name if self.path else "", error=error), "error")
         else:
@@ -537,38 +613,46 @@ class MediaPage(QWidget):
     def run_batch(self) -> None:
         from mirage.media.batch import run_batch
 
-        selected = self.settings.face_id
+        selected = self.selected_id
         if not selected:
             self._toast(tr("media_pick_face"), "info")
             return
         self._warn_if_live()
-        token = self._start(tr("media_rendering"))
-        self.view.clear_busy()
-        self.kind = BATCH
-        self.view.show_batch(tr("media_batch_progress", done=0, total=len(self.batch_items)), self.view.rows)
-        me = self._me_embedding()
+        # Continue where a cancelled run stopped: only the files still waiting.
+        pending = [(i, item) for i, item in enumerate(self.batch_items) if item.status == "waiting"]
+        rows = self.view.rows
+        self._token += 1
+        token = self._token
+        self._cancel = threading.Event()
+        self.busy = True
+        self.view.show_batch(tr("media_batch_progress", done=len(self.batch_items) - len(pending),
+                                total=len(self.batch_items)), rows)
+        me, selected_is_me = self._me_embedding(), self._selected_is_me()
         embeddings = self._embeddings([selected])
         options = RenderOptions(enhance=self.settings.photo_enhance)
-        items, cancel = self.batch_items, self._cancel
+        cancel = self._cancel
         renderer = self._renderer_obj()
+        index_of = [i for i, _item in pending]
 
         def plan_for(targets, size):
-            return auto_plan(targets, size, selected, me)
+            return auto_plan(targets, size, selected, me, selected_is_me)
 
         def work() -> None:
-            run_batch(items, plan_for, embeddings, options,
-                      on_update=lambda i, item: self._batchUpdate.emit((token, i, item.status, item.swapped)),
+            run_batch([item for _i, item in pending], plan_for, embeddings, options,
+                      on_update=lambda j, item: self._batchUpdate.emit(
+                          (token, index_of[j], item.status, item.error)),
                       cancel=cancel, render=renderer.render)
-            self._batchDone.emit((token, items))
+            self._batchDone.emit((token, self.batch_items))
 
-        threading.Thread(target=work, name="mirage-batch", daemon=True).start()
+        self._run(work, "mirage-batch")
         self._refresh()
 
     def _on_batch_update(self, payload) -> None:
-        token, i, status, _swapped = payload
+        token, i, status, error = payload
         if token != self._token or i >= len(self.view.rows):
             return
         self.view.rows[i].status = status
+        self.view.rows[i].detail = str(error)[:80] if error else ""
         done = sum(1 for r in self.view.rows if r.status not in ("waiting", "working"))
         self.view.batch_title = tr("media_batch_progress", done=done, total=len(self.view.rows))
         self.view.update()
@@ -577,10 +661,13 @@ class MediaPage(QWidget):
         token, items = payload
         if token != self._token:
             return
-        self.busy = False
-        count = {s: sum(1 for i in items if i.status == s) for s in ("saved", "skipped", "no_face", "failed")}
-        self.view.batch_title = tr("media_batch_done", saved=count["saved"],
-                                   skipped=count["skipped"] + count["no_face"], failed=count["failed"])
+        self._job_finished()
+        count = {s: sum(1 for i in items if i.status == s) for s in ("saved", "skipped", "no_face", "failed", "waiting")}
+        if count["waiting"]:
+            self.view.batch_title = tr("media_batch_stopped", saved=count["saved"], left=count["waiting"])
+        else:
+            self.view.batch_title = tr("media_batch_done", saved=count["saved"],
+                                       skipped=count["skipped"] + count["no_face"], failed=count["failed"])
         self._toast(self.view.batch_title, "warn" if count["failed"] else "info")
         self.view.update()
         self._refresh()
@@ -595,6 +682,8 @@ class MediaPage(QWidget):
             self._toast(tr("media_pick_face"), "info")
             return
         self._warn_if_live()
+        if self._renderer is not None:
+            self._renderer.release()  # video doesn't use GFPGAN: give its ~1.5 GB back first
         identities = []
         for t in self.targets:
             sid = self.plan.get(t.index)
@@ -621,7 +710,7 @@ class MediaPage(QWidget):
                     log.exception("video render failed")
                 self._videoDone.emit((token, None, exc))
 
-        threading.Thread(target=work, name="mirage-video", daemon=True).start()
+        self._run(work, "mirage-video")
 
     def _on_video_progress(self, payload) -> None:
         token, pr = payload
@@ -637,7 +726,7 @@ class MediaPage(QWidget):
         token, out, error = payload
         if token != self._token:
             return
-        self.busy = False
+        self._job_finished()
         self.view.clear_busy()
         if error is not None:
             if isinstance(error, getattr(video, "VideoCancelled", ())):
@@ -653,6 +742,8 @@ class MediaPage(QWidget):
 
     def _on_enhance(self, on: bool) -> None:
         self.win._set(self._enhance_field(), bool(on))
+        self._invalidate_output()  # the result on screen was made with the other setting
+        self._refresh()
 
     def _refresh(self) -> None:
         """Buttons follow the state: one obvious next step."""
@@ -682,12 +773,17 @@ class MediaPage(QWidget):
             else:
                 self.primary.set_mode("start", tr("media_show_in_finder"), icon="folder")
         elif kind == BATCH:
+            waiting = sum(1 for i in self.batch_items if i.status == "waiting")
             if busy:
                 self.primary.set_mode("stop", tr("media_cancel"))
-            elif all(i.status == "waiting" for i in self.batch_items):
-                self.primary.set_mode("start", tr("media_process_all", n=len(self.batch_items)), icon="swap")
-            else:
+            elif waiting == len(self.batch_items):
+                self.primary.set_mode("start", tr("media_process_all", n=waiting), icon="swap")
+            elif waiting:
+                self.primary.set_mode("start", tr("media_continue", n=waiting), icon="swap")
+            elif any(i.output for i in self.batch_items):
                 self.primary.set_mode("start", tr("media_show_in_finder"), icon="folder")
+            else:
+                self.primary.set_mode("start", tr("media_open"), icon="plus")
         elif kind == VIDEO:
             if busy and self.video_info is None:
                 self.primary.set_mode("busy", tr("media_working"))
@@ -698,7 +794,24 @@ class MediaPage(QWidget):
             else:
                 self.primary.set_mode("start", tr("media_open_video"), icon="film")
 
-    def leave(self) -> None:
-        """Leaving the mode: free GFPGAN's memory unless something is still running."""
-        if not self.busy and self._renderer is not None:
+    def _job_finished(self) -> None:
+        self.busy = False
+        if self._release_when_idle and not self.isVisible() and self._renderer is not None:
+            self._release_when_idle = False
             self._renderer.release()
+
+    def leave(self) -> None:
+        """Leaving the mode: free GFPGAN's memory now, or as soon as the running job ends."""
+        if self._renderer is None:
+            return
+        if self.busy:
+            self._release_when_idle = True
+        else:
+            self._renderer.release()
+
+    def shutdown(self, timeout: float = 8.0) -> None:
+        """App is quitting: cancel a running job (a video removes its partial file) and wait."""
+        self._cancel.set()
+        job = self._job
+        if job is not None and job.is_alive():
+            job.join(timeout)

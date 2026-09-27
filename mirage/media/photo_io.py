@@ -401,14 +401,29 @@ def _encoder(fmt: str, meta: PhotoMeta, exif: bytes | None) -> tuple[str, dict[s
     return pil_format, options
 
 
+_SOFTWARE, _DESCRIPTION = 0x0131, 0x010E
+
+
+def _mark_synthetic(exif) -> None:
+    """Say plainly in the file that its faces were swapped (see docs/RESPONSIBLE_USE.md)."""
+    from mirage import __version__
+
+    exif[_SOFTWARE] = f"Mirage {__version__} (face swap)"
+    exif[_DESCRIPTION] = "Faces swapped with Mirage - not an original photo"
+
+
 def _output_exif(raw: bytes | None, size: tuple[int, int]) -> bytes | None:
-    """Source EXIF made true for the saved pixels: upright, real size, no stale thumbnail."""
+    """Source EXIF made true for the saved pixels: upright, real size, no stale
+    thumbnail, and marked as face-swapped."""
     if not raw:
-        return None
+        exif = Image.Exif()
+        _mark_synthetic(exif)
+        return exif.tobytes()
     try:
         exif = Image.Exif()
         exif.load(raw)
         exif[_ORIENTATION] = 1
+        _mark_synthetic(exif)
         if _EXIF_IFD in exif:
             sub = exif.get_ifd(_EXIF_IFD)
             for tag, value in ((_EXIF_WIDTH, size[0]), (_EXIF_HEIGHT, size[1])):
