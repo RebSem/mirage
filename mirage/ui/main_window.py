@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QScrollArea,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -35,13 +36,16 @@ from mirage.library import FaceLibrary, NoFaceError, UnreadableImageError
 from mirage.settings import Settings
 from mirage.ui.faces import ADD, ME, RANDOM, FaceGrid
 from mirage.ui.look import LookPanel
+from mirage.ui.media_page import MediaPage
 from mirage.ui.stage import Stage
 from mirage.ui.toast import ToastHost
-from mirage.ui.widgets import GlassPanel, IconButton, PrimaryButton, StatusPill
+from mirage.ui.widgets import GlassPanel, IconButton, PrimaryButton, Segmented, StatusPill
 
 log = logging.getLogger(__name__)
 
-IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".tif", ".tiff"}
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".heic", ".heif", ".tif", ".tiff"}
+VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".avi", ".webm"}
+LIVE, MEDIA = "live", "media"
 AMBIENT_EVERY_S = 0.35
 
 
@@ -119,6 +123,8 @@ class MainWindow(QWidget):
         self.engine.apply(settings)
         self._on_state(self.engine.state)
         self._refresh_vcam_hint()
+        if settings.mode == MEDIA:
+            self._set_mode(MEDIA)
 
         if settings.window_geometry:
             try:
@@ -150,6 +156,12 @@ class MainWindow(QWidget):
         help_btn.clicked.connect(self._open_vcam_help)
         tl.addWidget(title)
         tl.addWidget(self.status)
+        tl.addSpacing(8)
+        self.mode_switch = Segmented([(LIVE, tr("mode_live")), (MEDIA, tr("mode_media"))])
+        self.mode_switch.setFixedWidth(260)
+        self.mode_switch.setFixedHeight(30)
+        self.mode_switch.changed.connect(self._set_mode)
+        tl.addWidget(self.mode_switch)
         tl.addStretch(1)
         tl.addWidget(self.vcam_label)
         tl.addWidget(help_btn)
@@ -159,9 +171,13 @@ class MainWindow(QWidget):
         body.setSpacing(theme.GAP)
         root.addLayout(body, 1)
 
-        left = QVBoxLayout()
+        self.pages = QStackedWidget()
+        live_page = QWidget()
+        left = QVBoxLayout(live_page)
+        left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(theme.GAP)
-        body.addLayout(left, 1)
+        self.pages.addWidget(live_page)
+        body.addWidget(self.pages, 1)
 
         self.stage_frame = GlassPanel(theme.RADIUS_STAGE)
         sf = QVBoxLayout(self.stage_frame)
@@ -243,17 +259,24 @@ class MainWindow(QWidget):
         sl.addWidget(self.look)
         body.addWidget(self.sidebar)
 
-        for panel in (self.stage_frame, self.bar, self.sidebar):
+        self.media = MediaPage(self)
+        self.pages.addWidget(self.media)
+
+        for panel in self._panels():
             panel.native_glass = self.glass.native
             self.glass.add(panel, panel.radius)
 
-        self.toasts = ToastHost(self, self.stage)
+        self.toasts = ToastHost(self, self.pages)
 
     def _build_menu(self) -> None:
         bar = QMenuBar(self)  # becomes the native macOS menu bar
         file_menu = bar.addMenu(tr("menu_file"))
         self._action(file_menu, tr("menu_add_photos"), "Ctrl+O", self.add_photos)
         self._action(file_menu, tr("menu_random_face"), "Ctrl+R", self.random_face)
+        file_menu.addSeparator()
+        self._action(file_menu, tr("menu_open_media"), "Ctrl+Shift+O", self.open_media)
+        self._action(file_menu, tr("media_save"), "Ctrl+S",
+                     lambda: self.media.save() if self.mode == MEDIA else None)
         live_menu = bar.addMenu(tr("menu_live"))
         self._action(live_menu, tr("menu_start_stop"), None, self.toggle_live)
         self._action(live_menu, tr("menu_mirror"), "Ctrl+Shift+M", lambda: self.mirror_btn.toggle())
@@ -280,8 +303,8 @@ class MainWindow(QWidget):
 
     def _build_shortcuts(self) -> None:
         # Keyboard actions are instant — no animation (they're used constantly).
-        QShortcut(QKeySequence(Qt.Key.Key_Space), self, self.toggle_live)
-        QShortcut(QKeySequence(Qt.Key.Key_0), self, lambda: self._select_face(None))
+        self._space = QShortcut(QKeySequence(Qt.Key.Key_Space), self, self.toggle_live)
+        QShortcut(QKeySequence(Qt.Key.Key_0), self, lambda: self._on_tile(ME))
         for n in range(1, 10):
             QShortcut(QKeySequence(str(n)), self, lambda n=n: self._select_by_number(n))
 
@@ -426,17 +449,23 @@ class MainWindow(QWidget):
     def _on_tile(self, face_id: str) -> None:
         if face_id == ADD:
             self.add_photos()
-        elif face_id == RANDOM:
+            return
+        if face_id == RANDOM:
             self.random_face()
-        elif face_id == ME:
-            self._select_face(None)
-        else:
-            self._select_face(face_id)
+            return
+        chosen = None if face_id == ME else face_id
+        if self.mode == MEDIA:
+            # Photos & videos keeps its own selection: editing files never
+            # changes (or turns off) the face in a running call.
+            if not self.media.pick_library(chosen):
+                self.grid.set_selected(self.media.selected_id)
+            return
+        self._select_face(chosen)
 
     def _select_by_number(self, n: int) -> None:
         entries = self.library.list()
         if 1 <= n <= len(entries):
-            self._select_face(entries[n - 1].id)
+            self._on_tile(entries[n - 1].id)
 
     def _select_face(self, face_id: str | None, announce: bool = True) -> None:
         embedding = None
@@ -465,11 +494,24 @@ class MainWindow(QWidget):
         if entry is None:
             return
         menu = QMenu(self)
+        is_me = self.settings.me_face_id == face_id
+        menu.addAction(tr("not_me") if is_me else tr("this_is_me"), lambda: self._toggle_me(face_id))
+        menu.addSeparator()
         menu.addAction(tr("rename"), lambda: self._rename(face_id))
         menu.addAction(tr("show_in_finder"), lambda: self._reveal(face_id))
         menu.addSeparator()
         menu.addAction(tr("remove"), lambda: self._remove(face_id))
         menu.exec(pos.toPoint())
+
+    def _toggle_me(self, face_id: str) -> None:
+        entry = self.library.get(face_id)
+        if entry is None:
+            return
+        if self.settings.me_face_id == face_id:
+            self._set("me_face_id", None)
+        else:
+            self._set("me_face_id", face_id)
+            self.toast(tr("me_marked", name=entry.name))
 
     def _rename(self, face_id: str) -> None:
         entry = self.library.get(face_id)
@@ -503,6 +545,9 @@ class MainWindow(QWidget):
         if box.clickedButton() is not remove_btn:
             return
         self.library.remove(face_id)
+        self.media.on_face_removed(face_id)
+        if self.settings.me_face_id == face_id:
+            self._set("me_face_id", None)
         if self.settings.face_id == face_id:
             self._select_face(None)
         self._reload_faces()
@@ -511,7 +556,7 @@ class MainWindow(QWidget):
     def add_photos(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
             self, tr("file_dialog_title"), str(Path.home() / "Pictures"),
-            tr("file_filter_images") + " (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.tif *.tiff)",
+            tr("file_filter_images") + " (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.heif *.tif *.tiff)",
         )
         if files:
             self._import([Path(f) for f in files])
@@ -549,10 +594,10 @@ class MainWindow(QWidget):
                 self.toast(tr("toast_import_failed", name=payload), "error")
         if len(added) == 1:
             self.toast(tr("toast_added", name=added[0].name))
-            self._select_face(added[0].id)
+            self._on_tile(added[0].id)
         elif len(added) > 1:
             self.toast(tr("toast_added_many", n=len(added)))
-            self._select_face(added[-1].id)
+            self._on_tile(added[-1].id)
 
     def random_face(self) -> None:
         self._busy_imports += 1
@@ -585,29 +630,95 @@ class MainWindow(QWidget):
             self.toast(tr("toast_random_failed") if error == "network"
                        else tr("toast_import_failed", name=tr("random_face")), "warn")
         else:
-            self._select_face(entry.id)
+            self._on_tile(entry.id)
 
     # ── drag & drop ──────────────────────────────────────────────────────
 
-    def _dropped_images(self, event) -> list[Path]:
+    def _dropped(self, event) -> list[Path]:
         urls = event.mimeData().urls() if event.mimeData().hasUrls() else []
-        return [Path(u.toLocalFile()) for u in urls
-                if u.isLocalFile() and Path(u.toLocalFile()).suffix.lower() in IMAGE_SUFFIXES]
+        return [Path(u.toLocalFile()) for u in urls if u.isLocalFile()]
+
+    def _drop_goes_to_media(self, event, files: list[Path]) -> bool:
+        """Sidebar → new faces for the gallery; anywhere else → Photos & videos
+        (in Live, only videos and folders go there; photos become faces)."""
+        over_sidebar = self.sidebar.geometry().contains(self.sidebar.parentWidget().mapFrom(self, event.position().toPoint()))
+        if over_sidebar:  # faces go to the gallery; videos and folders can't be faces
+            return any(f.is_dir() or f.suffix.lower() in VIDEO_SUFFIXES for f in files)
+        if self.mode == MEDIA:
+            return True
+        return any(f.is_dir() or f.suffix.lower() in VIDEO_SUFFIXES for f in files)
+
+    def _set_drop_highlight(self, on: bool, media: bool = False) -> None:
+        self.stage.set_drop_active(on and not media)
+        self.media.view.set_drop_active(on and media)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802
-        if self._dropped_images(event):
-            event.acceptProposedAction()
-            self.stage.set_drop_active(True)
-
-    def dragLeaveEvent(self, event) -> None:  # noqa: N802
-        self.stage.set_drop_active(False)
-
-    def dropEvent(self, event) -> None:  # noqa: N802
-        self.stage.set_drop_active(False)
-        files = self._dropped_images(event)
+        files = self._dropped(event)
         if files:
             event.acceptProposedAction()
-            self._import(files)
+            self._set_drop_highlight(True, self._drop_goes_to_media(event, files))
+
+    def dragMoveEvent(self, event) -> None:  # noqa: N802
+        files = self._dropped(event)
+        if files:
+            event.acceptProposedAction()
+            self._set_drop_highlight(True, self._drop_goes_to_media(event, files))
+
+    def dragLeaveEvent(self, event) -> None:  # noqa: N802
+        self._set_drop_highlight(False)
+
+    def dropEvent(self, event) -> None:  # noqa: N802
+        self._set_drop_highlight(False)
+        files = self._dropped(event)
+        if not files:
+            return
+        event.acceptProposedAction()
+        if self._drop_goes_to_media(event, files):
+            self._set_mode(MEDIA)
+            self.media.open_paths(files)
+            return
+        images = [f for f in files if f.suffix.lower() in IMAGE_SUFFIXES]
+        if images:
+            self._import(images)
+
+    # ── modes ────────────────────────────────────────────────────────────
+
+    @property
+    def mode(self) -> str:
+        return MEDIA if self.pages.currentWidget() is self.media else LIVE
+
+    def _set_mode(self, mode: str) -> None:
+        if mode == self.mode:
+            return
+        if mode == LIVE:
+            self.media.leave()
+        self.pages.setCurrentWidget(self.media if mode == MEDIA else self.pages.widget(0))
+        self.grid.set_selected(self.media.selected_id if mode == MEDIA else self.settings.face_id)
+        self.mode_switch.set_value(mode, animate=False)
+        self._space.setEnabled(mode == LIVE)  # in Photos & videos Space means "hold to compare"
+        self.toasts.sync_geometry()
+        if self.settings.mode != mode:
+            self._set("mode", mode)
+
+    def open_media(self) -> None:
+        self._set_mode(MEDIA)
+        self.media.open_dialog()
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802
+        if self.mode == MEDIA and not event.isAutoRepeat():
+            if event.key() == Qt.Key.Key_Space:
+                self.media.compare(True)
+                return
+            if event.key() == Qt.Key.Key_Escape:
+                self.media.clear_active()
+                return
+        super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:  # noqa: N802
+        if self.mode == MEDIA and not event.isAutoRepeat() and event.key() == Qt.Key.Key_Space:
+            self.media.compare(False)
+            return
+        super().keyReleaseEvent(event)
 
     # ── settings ─────────────────────────────────────────────────────────
 
@@ -643,9 +754,12 @@ class MainWindow(QWidget):
         super().showEvent(event)
         QTimer.singleShot(0, self._install_glass)
 
+    def _panels(self) -> tuple:
+        return (self.stage_frame, self.bar, self.sidebar, self.media.frame, self.media.bar)
+
     def _install_glass(self) -> None:
         self.glass.install()
-        for panel in (self.stage_frame, self.bar, self.sidebar):
+        for panel in self._panels():
             panel.native_glass = self.glass.native  # falls back to painted glass if install failed
             panel.update()
 

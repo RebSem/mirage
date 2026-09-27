@@ -109,6 +109,85 @@ def draw_icon(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
         lens.lineTo(c.x() + s * 0.40, c.y() + s * 0.20)
         lens.lineTo(c.x() + s * 0.18, c.y() + s * 0.08)
         p.drawPath(lens)
+    elif name == "photo":
+        p.setPen(QPen(color, max(1.5, s * 0.08)))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        frame = QRectF(c.x() - s * 0.40, c.y() - s * 0.30, s * 0.80, s * 0.60)
+        p.drawRoundedRect(frame, s * 0.08, s * 0.08)
+        hill = QPainterPath()
+        hill.moveTo(frame.left() + s * 0.06, frame.bottom() - s * 0.06)
+        hill.lineTo(c.x() - s * 0.08, c.y() - s * 0.02)
+        hill.lineTo(c.x() + s * 0.06, c.y() + s * 0.12)
+        hill.lineTo(c.x() + s * 0.18, c.y() + s * 0.02)
+        hill.lineTo(frame.right() - s * 0.06, frame.bottom() - s * 0.06)
+        p.drawPath(hill)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawEllipse(QPointF(c.x() + s * 0.18, c.y() - s * 0.14), s * 0.06, s * 0.06)
+    elif name == "swap":
+        p.setPen(pen)
+        r = s * 0.30
+        for sign in (-1, 1):
+            y = c.y() + sign * s * 0.12
+            p.drawLine(QPointF(c.x() - r, y), QPointF(c.x() + r, y))
+            tip = c.x() + (r if sign < 0 else -r)
+            back = tip - s * 0.12 if sign < 0 else tip + s * 0.12  # arrowheads: → on top, ← below
+            p.drawLine(QPointF(tip, y), QPointF(back, y - s * 0.10))
+            p.drawLine(QPointF(tip, y), QPointF(back, y + s * 0.10))
+    elif name == "save":
+        p.setPen(pen)
+        p.drawLine(QPointF(c.x(), c.y() - s * 0.34), QPointF(c.x(), c.y() + s * 0.10))
+        p.drawLine(QPointF(c.x() - s * 0.14, c.y() - s * 0.04), QPointF(c.x(), c.y() + s * 0.10))
+        p.drawLine(QPointF(c.x() + s * 0.14, c.y() - s * 0.04), QPointF(c.x(), c.y() + s * 0.10))
+        tray = QPainterPath()
+        tray.moveTo(c.x() - s * 0.34, c.y() + s * 0.06)
+        tray.lineTo(c.x() - s * 0.34, c.y() + s * 0.30)
+        tray.lineTo(c.x() + s * 0.34, c.y() + s * 0.30)
+        tray.lineTo(c.x() + s * 0.34, c.y() + s * 0.06)
+        p.drawPath(tray)
+    elif name == "folder":
+        p.setPen(QPen(color, max(1.5, s * 0.08)))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        body = QPainterPath()
+        body.moveTo(c.x() - s * 0.38, c.y() - s * 0.24)
+        body.lineTo(c.x() - s * 0.12, c.y() - s * 0.24)
+        body.lineTo(c.x() - s * 0.04, c.y() - s * 0.14)
+        body.lineTo(c.x() + s * 0.38, c.y() - s * 0.14)
+        body.lineTo(c.x() + s * 0.38, c.y() + s * 0.28)
+        body.lineTo(c.x() - s * 0.38, c.y() + s * 0.28)
+        body.closeSubpath()
+        p.drawPath(body)
+    elif name == "film":
+        p.setPen(QPen(color, max(1.5, s * 0.08)))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        frame = QRectF(c.x() - s * 0.34, c.y() - s * 0.36, s * 0.68, s * 0.72)
+        p.drawRoundedRect(frame, s * 0.06, s * 0.06)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        for i in range(3):
+            y = frame.top() + s * (0.12 + i * 0.22)
+            p.drawRect(QRectF(frame.left() + s * 0.04, y, s * 0.08, s * 0.08))
+            p.drawRect(QRectF(frame.right() - s * 0.12, y, s * 0.08, s * 0.08))
+    elif name == "people":
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        for dx, scale in ((-0.16, 0.8), (0.16, 1.0)):
+            p.drawEllipse(QPointF(c.x() + dx * s, c.y() - s * 0.14), s * 0.12 * scale, s * 0.12 * scale)
+            body = QPainterPath()
+            body.addRoundedRect(QRectF(c.x() + dx * s - s * 0.20 * scale, c.y() + s * 0.04,
+                                       s * 0.40 * scale, s * 0.26 * scale), s * 0.12, s * 0.12)
+            p.drawPath(body)
+    elif name == "compare":
+        p.setPen(QPen(color, max(1.5, s * 0.08)))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(c, s * 0.34, s * 0.34)
+        half = QPainterPath()
+        half.moveTo(c.x(), c.y() - s * 0.34)
+        half.arcTo(QRectF(c.x() - s * 0.34, c.y() - s * 0.34, s * 0.68, s * 0.68), 90, 180)
+        half.closeSubpath()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawPath(half)
     elif name == "help":
         p.setPen(QPen(color, max(1.4, s * 0.08)))
         p.setBrush(Qt.BrushStyle.NoBrush)
@@ -173,6 +252,7 @@ class PrimaryButton(_Pressable):
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.mode = "start"        # start | stop | busy
+        self.icon = "play"
         self._spin = 0.0
         self._spinner = QTimer(self)
         self._spinner.setInterval(16)
@@ -183,9 +263,11 @@ class PrimaryButton(_Pressable):
     def sizeHint(self) -> QSize:  # noqa: N802
         return QSize(220, 52)
 
-    def set_mode(self, mode: str, text: str) -> None:
+    def set_mode(self, mode: str, text: str, icon: str | None = None) -> None:
         self.mode = mode
+        self.icon = icon or ("stop" if mode == "stop" else "play")
         self.setText(text)
+        self.setAccessibleName(text)
         self.setEnabled(mode != "busy")
         if mode == "busy":
             self._spinner.start()
@@ -235,7 +317,7 @@ class PrimaryButton(_Pressable):
             p.setPen(QPen(QColor(255, 255, 255, 220), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawArc(icon.adjusted(1, 1, -1, -1), int(-self._spin * 16), 270 * 16)
         else:
-            draw_icon(p, "stop" if self.mode == "stop" else "play", icon, QColor("white"))
+            draw_icon(p, self.icon, icon, QColor("white"))
         p.setPen(QColor("white"))
         p.drawText(QRectF(icon.right() + 10, r.top(), text_w + 4, r.height()),
                    Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())

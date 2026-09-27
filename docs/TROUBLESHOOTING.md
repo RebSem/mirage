@@ -14,6 +14,14 @@ attached is the fastest way to get help.
 - [“Looking for your face…” while live](#looking-for-your-face-while-live)
 - [The wrong camera is used](#the-wrong-camera-is-used)
 - [Face names reset to “Face”](#face-names-reset-to-face)
+- [Photos & videos](#photos--videos): [ffmpeg](#videos-need-ffmpeg),
+  [no faces found](#no-faces-found-here),
+  [the wrong person swapped](#the-wrong-person-got-swapped),
+  [the first photo is slow](#the-first-photo-takes-a-while),
+  [slow videos](#making-a-video-is-slow-or-the-mac-gets-warm),
+  [washed-out videos](#the-video-looks-washed-out),
+  [no sound](#the-video-has-no-sound),
+  [where the results are](#where-are-my-results)
 - [Install problems](#install-problems)
 - [Where the logs are](#where-the-logs-are)
 - [Reset or uninstall](#reset-or-uninstall)
@@ -31,13 +39,18 @@ camera”*. To change your mind:
 2. If you started Mirage from a terminal (`make run`), macOS asks on behalf of
    the terminal app, so turn on **Terminal** (or iTerm, or whatever you use)
    instead.
-3. Press **Start** again. No need to restart Mirage.
+3. Press **Start** again. If Mirage still says no, quit and reopen it.
 
 If you see *“The camera didn't start”* or the preview stays empty, quit other
 apps that use the webcam (Zoom, FaceTime, Photo Booth) or switch them to
 *OBS Virtual Camera*, then press Start again. If you have more than one
 camera, also check that the right one is picked (see
 [The wrong camera is used](#the-wrong-camera-is-used)).
+
+If Mirage stops on its own and says *“The camera stopped sending video”*, the
+camera sent nothing for 5 seconds; for example, it was unplugged or another
+app took it over. Shorter gaps don't stop Mirage. Press **Start** again once
+the camera is back.
 
 ## OBS Virtual Camera is missing
 
@@ -73,9 +86,9 @@ If Mirage is live and Zoom still shows the logo, look at Mirage's top bar:
 ### “Nothing is reaching OBS Virtual Camera”
 
 Mirage shows this in its top bar (with a short toast) when it has been live
-for a few seconds but OBS's camera extension is not receiving its frames.
-Your preview keeps working; only the call misses out. Usually it is one of
-these:
+for a few seconds but still can't connect to OBS Virtual Camera, so no
+frames reach the call. Your preview keeps working; only the call misses out.
+Usually it is one of these:
 
 - **OBS is running its own virtual camera.** Only one app can feed it; click
   *Stop Virtual Camera* in OBS or quit OBS.
@@ -100,9 +113,14 @@ you get less:
   anything exporting video.
 - Let it breathe. The MacBook Air has no fan and slows down when it gets hot;
   keep it on a hard surface, not a blanket or your lap.
+- Don't make a video or run a batch in **Photos & videos** during a call:
+  both use the Neural Engine, so the call gets fewer fps while they run.
 - Turn on *Show FPS* (under **More**) to see the effect of each change.
 
 ## “No face found” in a photo
+
+This is about adding a face to your gallery. For photos opened in
+**Photos & videos**, see [“No faces found here”](#no-faces-found-here).
 
 Mirage needs a clear face in each photo you add (if there are several, it
 takes the largest). Use a photo that is:
@@ -115,18 +133,25 @@ takes the largest). Use a photo that is:
 If the photo has several people, crop it to the one you want first. Very
 close-up portraits are fine.
 
+If Mirage says the file *isn't an image Mirage can read*, open it in Preview
+and export it as JPEG or PNG. JPEG, PNG, WebP, BMP, TIFF and iPhone HEIC
+photos all work.
+
 ## “Looking for your face…” while live
 
 Mirage cannot see your face on the camera right now. Face the camera, light
-your face from the front (a bright window behind you is the usual culprit)
-and move back a little if you are very close. The swap follows the largest
-face in view, so it will ignore a poster behind you.
+your face from the front (a bright window behind you is the usual culprit),
+and move back a little if you are very close, or closer if you sit far away.
+The swap follows the largest face in view, so it will ignore a poster behind
+you.
 
 ## The wrong camera is used
 
-Pick your camera in Mirage's **Camera** setting. Mirage remembers the choice
-by the camera's ID, so an iPhone with Continuity Camera turning up later does
-not steal the slot. OBS Virtual Camera is never offered as an input, because
+Pick your camera in the menu at the bottom left of Mirage's window, next to
+the camera icon (you can change it while Mirage is not live). The list is
+refreshed every time you open it. Mirage remembers the choice by the
+camera's ID, so an iPhone with Continuity Camera turning up later does not
+steal the slot. OBS Virtual Camera is never offered as an input, because
 Mirage writes to it.
 
 ## Face names reset to “Face”
@@ -136,12 +161,119 @@ Mirage keeps the list of your faces in `faces/index.json` inside
 crash or a full disk at the wrong moment), Mirage rebuilds the list from the
 saved face files the next time it starts. Your faces come back, in the order
 you added them, but their names reset to *Face*: right-click a face and
-choose **Rename…** to fix them. The damaged file is kept next to them as
-`faces/index.corrupt-<time>.json`, in case you want to copy the old names
+choose **Rename…** to fix them. The damaged file is kept in the same folder
+as `faces/index.corrupt-<time>.json`, in case you want to copy the old names
 from it.
 
 If the saved data of a single face is damaged, Mirage shows your real face
 instead and tells you; remove that face and add its photo again.
+
+## Photos & videos
+
+How the mode decides and saves is described in [MEDIA.md](MEDIA.md).
+
+### “Videos need ffmpeg”
+
+Mirage reads and writes videos with ffmpeg. `make install` installs it with
+Homebrew; if that step was skipped or failed, run `make install` again or
+install it yourself:
+
+```bash
+brew install ffmpeg
+```
+
+There is no need to restart Mirage: it looks for ffmpeg every time you open
+a video, in Homebrew's folders as well as on your `PATH`. Photos and Live
+work without ffmpeg.
+
+### “No faces found here”
+
+Mirage searched the whole photo and found no face. It finds faces that are:
+
+- **big enough**: a tiny face in a wide group shot can be missed. On large
+  photos Mirage takes a second, closer look for small faces, so the
+  full-size original works better than a shrunk copy (for example one saved
+  from a messenger). Try a bigger photo;
+- **turned towards the camera**: profiles and strongly angled faces are hard
+  to find;
+- **uncovered**: no sunglasses, masks or hands over the face.
+
+For a video, Mirage looks for faces in 8 frames spread over the clip and
+shows the best one. If nobody faces the camera in any of them, trim the clip
+to the part where people are clearly visible.
+
+### The wrong person got swapped
+
+By default Mirage swaps you, if one of your faces is marked **This is me**
+and you are in the picture; otherwise the largest face (of two about the
+same size, the one nearer the centre). To change that:
+
+- **Click a face in the picture** and pick who it becomes; pick
+  **Leave as is** for anyone who should stay as they are.
+- **Mark yourself.** Right-click your own face in the gallery on the right
+  and choose **This is me**. From then on Mirage looks for you first in
+  photos, batches and videos. If it still misses you (very different light,
+  angle or age), add a clearer photo of yourself and mark that one.
+- **Batches** always use the automatic choice. To fix single photos, open
+  them one at a time.
+- **Videos** follow people by their faces, starting from the frame Mirage
+  shows. People who look very much alike, or faces that are small or turned
+  away, can still be mixed up in places.
+
+### The first photo takes a while
+
+The first time you open a photo, finding faces takes about 10 seconds while
+the models load, and the first **Swap** another 4–7 seconds while the face
+enhancer (GFPGAN) loads. The very first time, the enhancer is also
+downloaded (about 370 MB). After that, finding faces takes well under a
+second, and swapping about half a second per face on a MacBook Air M1.
+Switching back to **Live** frees the enhancer's memory, so the next swap
+after that loads it again.
+
+### Making a video is slow, or the Mac gets warm
+
+That is expected: every face in every frame goes through the swap model. On
+a MacBook Air M1, a 720p video with one face renders at about 13–14 frames
+per second (a one-minute clip at 30 fps takes a bit over two minutes), and
+with two people at about 10. To go faster:
+
+- Plug in the charger. A fanless Air slows down as it heats up; the time
+  left adjusts as it goes.
+- Stop **Live**. A call and a render share the Neural Engine, so both get
+  slower.
+- Leave **Enhance faces (slower)** off for videos.
+- Close other heavy apps.
+
+The Mac stays awake while a video renders, so you can leave it running, and
+it is normal for it to get warm.
+
+### The video looks washed out
+
+iPhone videos are usually HDR. Mirage converts them to standard (SDR) colour
+on the Mac's video hardware (VideoToolbox). If that conversion can't be used
+for a file, Mirage falls back to plain decoding and the result looks pale and
+flat. Please [open an issue](https://github.com/RebSem/mirage/issues/new/choose)
+with the [log](#where-the-logs-are) attached and, if you can, say which phone
+or camera recorded the clip.
+
+### The video has no sound
+
+Mirage copies the original's sound, or converts it to AAC when an MP4 file
+can't hold it as it is. If even that fails, the video is saved without sound
+and the [log](#where-the-logs-are) says why. Check that the original has
+sound in the first place.
+
+### Where are my results?
+
+Next to the originals, in the same folder: `name-mirage.jpg` for a photo (in
+the original's format; HEIC becomes JPEG) and `name-mirage.mp4` for a video,
+with `-2`, `-3` and so on if you swap the same file again. **Show in Finder**
+selects the file. Originals are never modified or overwritten.
+
+A single photo is saved only when you press **Save** (`⌘S`); a batch and a
+video save each result as soon as it is ready. If saving fails (for
+example, the folder is on a read-only disk), copy the originals to a folder
+you can write to, such as *Pictures*, and try again.
 
 ## Install problems
 
@@ -198,7 +330,8 @@ The [logs](#where-the-logs-are) say what went wrong.
 
 ## Where the logs are
 
-Mirage writes its logs to `~/Library/Logs/Mirage`. Open the folder with
+Mirage writes its logs to `~/Library/Logs/Mirage`: `mirage.log`, plus
+`launcher.log` when you start `Mirage.app`. Open the folder with
 **Help → Show Logs**, or from a terminal:
 
 ```bash
@@ -225,5 +358,6 @@ rm -rf ~/Library/Application\ Support/Mirage
 2. Delete the `mirage` folder you cloned (it holds the venv and the models).
 3. Delete `~/Library/Application Support/Mirage` and `~/Library/Logs/Mirage`.
 4. Delete `~/.insightface/models/buffalo_l` (the face detection models).
-5. Optionally, uninstall OBS and remove Mirage under **System Settings →
-   Privacy & Security → Camera**.
+5. Optionally, uninstall OBS, and ffmpeg too (`brew uninstall ffmpeg`) if
+   nothing else of yours needs it, and turn Mirage off under
+   **System Settings → Privacy & Security → Camera**.

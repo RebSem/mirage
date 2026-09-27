@@ -26,7 +26,20 @@ def test_defaults_match_contract() -> None:
         "language": "auto",
         "onboarding_done": False,
         "window_geometry": None,
+        "mode": "live",
+        "me_face_id": None,
+        "photo_enhance": True,
+        "video_enhance": False,
     }
+
+
+def test_mode_is_validated(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    path.write_text('{"mode": "MEDIA", "me_face_id": "abc", "video_enhance": "yes"}', encoding="utf-8")
+    loaded = settings.load(path)
+    assert loaded.mode == "media" and loaded.me_face_id == "abc" and loaded.video_enhance is False
+    path.write_text('{"mode": "cinema"}', encoding="utf-8")
+    assert settings.load(path).mode == "live"
 
 
 def test_missing_file_gives_defaults(tmp_path: Path) -> None:

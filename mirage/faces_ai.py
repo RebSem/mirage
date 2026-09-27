@@ -72,8 +72,16 @@ def embed(image: np.ndarray) -> DetectedFace | None:
         i = int(areas.argmax())
         face = Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
         recognizer.get(probe, face)
+        gender = age = None
+        try:  # for "natural-looking" suggestions in Photos & videos
+            from mirage.media.analyze import _genderage
+
+            _genderage().get(probe, face)
+            gender, age = int(face.gender), float(face.age)
+        except Exception:
+            pass
         x1, y1, x2, y2 = (float(v) - pad for v in face.bbox[:4])
-        return DetectedFace(np.asarray(face.embedding, dtype=np.float32), (x1, y1, x2, y2))
+        return DetectedFace(np.asarray(face.embedding, dtype=np.float32), (x1, y1, x2, y2), gender, age)
     return None
 
 

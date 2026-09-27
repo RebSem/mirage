@@ -513,3 +513,14 @@ def test_heic_import_on_macos(lib: FaceLibrary, tmp_path: Path) -> None:
     entry = lib.add_file(heic)
     assert entry.name == "iPhone photo"
     assert read_image(lib.thumb_path(entry.id)).shape == (256, 256, 3)
+
+
+def test_attributes_are_stored_and_survive_reload(tmp_path: Path, embedder: FakeEmbedder) -> None:
+    lib = FaceLibrary(tmp_path / "faces", embedder)
+    face_id = lib.add_image(make_image(), "Ann").id
+    assert lib.get(face_id).gender is None
+    lib.set_attributes(face_id, 0, 31.46)
+    again = FaceLibrary(tmp_path / "faces", embedder).get(face_id)
+    assert (again.gender, again.age) == (0, 31.5)
+    lib.set_attributes(face_id, 7, float("nan"))  # nonsense is dropped, not stored
+    assert (lib.get(face_id).gender, lib.get(face_id).age) == (None, None)

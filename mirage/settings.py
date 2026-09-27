@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 QUALITIES = ("fast", "balanced", "best")
 LANGUAGES = ("auto", "en", "ru")
 _UNIT_FIELDS = ("opacity", "sharpness")  # floats clamped to 0..1
-_CHOICES = {"quality": QUALITIES, "language": LANGUAGES}
+MODES = ("live", "media")
+_CHOICES = {"quality": QUALITIES, "language": LANGUAGES, "mode": MODES}
 
 
 @dataclass
@@ -44,6 +45,10 @@ class Settings:
     language: str = "auto"  # "auto" | "en" | "ru"
     onboarding_done: bool = False
     window_geometry: str | None = None  # base64 of QWidget.saveGeometry()
+    mode: str = "live"  # "live" | "media" (Photos & videos)
+    me_face_id: str | None = None  # library face marked "This is me" (found first in photos)
+    photo_enhance: bool = True  # GFPGAN on swapped faces in photos
+    video_enhance: bool = False  # GPEN-256 in videos (slow on M1)
 
 
 _DEFAULTS = Settings()

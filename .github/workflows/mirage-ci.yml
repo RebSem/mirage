@@ -24,7 +24,7 @@ jobs:
       # Mirage's unit tests need no models, camera or display, so a light
       # install is enough; the full requirements.txt is not needed here.
       - name: Install test dependencies
-        run: python -m pip install numpy opencv-python-headless pytest "ruff==0.15.7"
+        run: python -m pip install numpy opencv-python-headless pillow pytest "ruff==0.15.7"
       - name: Ruff
         run: ruff check --output-format=github mirage tests/mirage
       - name: Pytest
