@@ -18,7 +18,7 @@ def test_same_placeholders_in_every_language():
 
 def test_tr_formats_and_falls_back():
     i18n.set_language("ru")
-    assert i18n.tr("toast_added", name="Ann") == "Добавлено «Ann»"
+    assert i18n.tr("toast_added", name="Ann") == "Лицо «Ann» добавлено"
     assert i18n.tr("no_such_key") == "no_such_key"
     i18n.set_language("en")
     assert i18n.tr("start") == "Start"

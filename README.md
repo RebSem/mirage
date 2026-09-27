@@ -32,21 +32,23 @@ camera plumbing, and a pile of stability fixes.
 ## What it does
 
 - **One window, Liquid Glass.** A live preview stage and one big Start/Stop
-  button. The sidebar and control bar are native macOS glass
-  (`NSGlassEffectView`) that refracts a soft glow of your own video.
-- **A face library.** Drag photos into the sidebar. Faces show up as big round
-  thumbnails. Click one or press `1`–`9` to switch instantly (the face
-  embeddings are cached, so there is no re-detection). `0` (the *Me* tile) gives
-  you your real face back, 🎲 gives you a random generated one.
-- **Simple controls.** Quality presets **Fast / Balanced / Best** (Best adds
-  face enhancement), *Keep my mouth* (your own mouth stays visible, so talking
-  looks natural), a blend slider and a sharpness slider. Under **More**:
+  button. The stage, the sidebar and the control bar sit on native macOS
+  glass (`NSGlassEffectView`) that refracts a soft glow of your own video.
+- **A face library.** Drag photos onto the window (iPhone HEIC photos work
+  too). Faces show up as big round thumbnails. Click one or press `1`–`9` to
+  switch instantly (the face embeddings are cached, so nothing has to be
+  detected again). `0` (the *Me* tile) gives you your real face back, 🎲 gives
+  you a random generated one.
+- **Simple controls** in the *Look* section. Quality presets
+  **Fast / Balanced / Best** (Best adds face enhancement), *Keep my mouth*
+  (your real mouth stays in the picture, so talking looks natural), a blend
+  slider and a sharpness slider. Under **More**:
   *Swap everyone in view* (every face in the picture gets the one you picked),
   *Fix blue tint*, *Smooth edges* and *Show FPS*.
 - **Made for calls.** Video goes straight to **OBS Virtual Camera** at a fixed
-  1280×720, so Zoom never sees the stream restart when your webcam changes
-  shape. It keeps working with the window minimised, and keeps your Mac awake
-  while you are live.
+  1280×720, so Zoom never sees the stream restart when your webcam switches
+  between 4:3 and 16:9. It keeps working with the window minimised, and keeps
+  your Mac awake while you are live.
 - **Starts and quits cleanly.** Only one copy runs (launching it again just
   brings the window forward). Quitting always releases the camera and stops
   every thread, even in the middle of a call.
@@ -76,8 +78,9 @@ make install
 ```
 
 `make install` runs `scripts/install.sh`: it installs Python 3.14 with
-Homebrew, creates a virtual environment, downloads the models and offers to
-install OBS. It is safe to run again; finished steps are skipped.
+Homebrew (if you don't have it yet), creates a virtual environment, installs
+the Python packages, downloads the models and offers to install OBS. It is
+safe to run again; finished steps are skipped.
 
 The **Best** preset adds a face enhancer, GPEN-BFR-256 (about 75 MB). Mirage
 downloads it the first time you choose Best; to get it ahead of time, run
@@ -102,7 +105,7 @@ that folder. If you do move it, run `make install-app` again from the new place.
 The first time you press Start, Mirage asks macOS for camera access and waits
 for your answer. Click **Allow** (said no by accident? See
 [Troubleshooting](docs/TROUBLESHOOTING.md#mirage-cant-use-the-camera)). If the
-virtual camera does not show up in Zoom yet, open OBS once and click
+virtual camera does not show up in Zoom yet, open OBS and click
 **Start Virtual Camera** once to install its system extension (details in
 [Troubleshooting](docs/TROUBLESHOOTING.md#obs-virtual-camera-is-missing)).
 
@@ -115,8 +118,8 @@ virtual camera does not show up in Zoom yet, open OBS once and click
    *OBS Virtual Camera* as your camera.
 4. Switch faces during the call with `1`–`9`. Press `0` to be yourself again.
 
-Do not press *Start Virtual Camera* inside OBS while Mirage is streaming; they
-would fight over the same camera. If Zoom shows the OBS logo instead of you,
+Do not press *Start Virtual Camera* inside OBS while Mirage is live: only one
+app can feed the virtual camera. If Zoom shows the OBS logo instead of you,
 Mirage is not live yet, or its frames are not getting through (see
 [Troubleshooting](docs/TROUBLESHOOTING.md#zoom-shows-the-obs-logo-or-a-black-picture)).
 
@@ -155,7 +158,8 @@ generated face from thispersondoesnotexist.com when you press 🎲.
 | Faces and settings | `~/Library/Application Support/Mirage` |
 | Logs | `~/Library/Logs/Mirage` |
 
-To start from scratch, quit Mirage and delete the first folder.
+To start from scratch, quit Mirage and delete
+`~/Library/Application Support/Mirage`.
 
 ## The classic Deep-Live-Cam UI
 

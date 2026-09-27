@@ -48,12 +48,12 @@ it is to pull in upstream improvements later. So:
 
 ```bash
 make test         # unit tests
-make lint         # lint checks (CI also runs ruff on every pull request)
+make lint         # ruff, plus shellcheck on scripts/*.sh if you have it
 ```
 
-Both use the tools that `make dev` installs (pytest and ruff, listed in
-`requirements-dev.txt`), so run it once after `make install`. `make lint`
-also runs shellcheck on `scripts/*.sh` if you have it.
+Both use the tools listed in `requirements-dev.txt` (pytest and ruff), which
+`make dev` installs; `make test` runs it for you the first time. CI runs
+ruff and the unit tests on every pull request.
 
 Tests in `tests/mirage/` must run **without models, a camera, network access
 or a display**. Use fakes (for example a fake embedder for the face library)

@@ -16,25 +16,30 @@ there at the cost of clarity or frame rate.
 Roughly (the widgets in `mirage/ui/` are the source of truth):
 
 ```
-┌──────────────────────────────────────────────┬─────────────────┐
-│ ● ● ●                                        │  Faces          │
-│                                              │  ◯ Me   ◯ 1     │
-│                 stage                        │  ◯ 2    ◯ 3     │
-│             (live preview)                   │  + Add  Random  │
-│                                              │                 │
-│                                              │  Look           │
-│                                              │  Fast|Bal|Best  │
-├──────────────────────────────────────────────┤  blend, sharp…  │
-│  camera · status          [   Start   ]      │                 │
-└──────────────────────────────────────────────┴─────────────────┘
-      glass control bar                            glass sidebar
+ ● ● ●  Mirage  ● Ready               Zoom camera: “OBS Virtual Camera”  (?)
+┌──────────────────────────────────────────────┐ ┌─────────────────┐
+│                                              │ │  Faces          │
+│                                              │ │  ◯ Me   ◯ 1     │
+│                 stage                        │ │  ◯ 2    ◯ 3     │
+│             (live preview)                   │ │  + Add  Random  │
+│                                              │ │                 │
+│                                              │ │  Look           │
+└──────────────────────────────────────────────┘ │  Fast|Bal|Best  │
+┌──────────────────────────────────────────────┐ │  blend, sharp…  │
+│  camera ▾          [   Start   ]      mirror │ │                 │
+└──────────────────────────────────────────────┘ └─────────────────┘
+      glass control bar                              glass sidebar
 ```
 
-- **Stage** (left): the live preview. When idle it explains what to do next.
-- **Sidebar** (right, glass): the face library on top, the look settings
+- **Top bar** (next to the traffic lights, no glass): the app name, the
+  status pill, the virtual camera hint and a help button that opens the
+  matching troubleshooting section.
+- **Stage** (left, glass): the live preview. When idle it explains what to do
+  next; while you drag photos over the window it shows where to drop them.
+- **Sidebar** (right, glass): the face library on top, the *Look* settings
   below it.
-- **Control bar** (under the stage, glass): camera, status and the one big
-  **Start / Stop** button.
+- **Control bar** (under the stage, glass): the camera menu, the one big
+  **Start / Stop** button and the mirror toggle.
 
 ## How the Liquid Glass works
 
@@ -74,9 +79,9 @@ The ambient layer is what makes the glass feel alive: it refracts the colours
 of *your* video, so the window glows warm under a desk lamp and blue under a
 monitor.
 
-- Each update takes a live frame, shrinks it to 40×24 pixels, blurs it, boosts
-  saturation and darkens it a little so white text on the glass stays
-  readable.
+- While you are live, about three times a second it takes a frame, shrinks
+  it to 40×24 pixels, blurs it, boosts saturation and darkens it a little so
+  white text on the glass stays readable.
 - Core Animation scales it up to the whole window with smooth filtering and
   cross-fades between updates, so there is no flicker.
 - It sits at slightly less than full opacity, letting a hint of the desktop
@@ -92,9 +97,10 @@ the scaling and blending happen on the GPU.
 `NSGlassEffectView` exists only on macOS 26 and newer. Mirage checks for it at
 start-up and also respects **System Settings → Accessibility → Display →
 Reduce transparency**. If glass is not available, or anything goes wrong while
-setting up the native views, Mirage logs it and falls back: the same widgets
-paint a translucent fill with a faint edge themselves. Same layout, same
-controls, just flatter. Looks are never a reason to crash.
+setting up the native views (Mirage logs that), it falls back: the window
+paints an opaque dark background, and the same panels paint a translucent
+fill with a faint edge themselves. Same layout, same controls, just flatter.
+Looks are never a reason to crash.
 
 ## Design rules
 
@@ -106,7 +112,9 @@ controls, just flatter. Looks are never a reason to crash.
    status.
 3. **Toasts, not modal errors.** Problems appear as a short glass toast that
    says what happened and what to do (“No face found in ‘beach.jpg’. Try a
-   clear, front-facing photo.”). Nothing modal ever pops up during a call.
+   clear, front-facing photo.”). No error dialog ever pops up during a call;
+   the only dialogs are the ones you ask for, like renaming or removing a
+   face.
 4. **Faces are the content.** Big round thumbnails you can recognise at a
    glance; `1`–`9` match their order, `0` is always you.
 5. **Keyboard first, mouse friendly.** Every common action has a shortcut
@@ -114,9 +122,9 @@ controls, just flatter. Looks are never a reason to crash.
    with a click or a drag.
 6. **No surprises on the call.** Mirroring affects the preview only; the
    virtual camera is always 1280×720 and never restarts while live.
-7. **Always dark.** The glass is forced to the dark appearance and the palette
-   is tuned for white text over tinted glass, because video looks best on
-   dark surroundings.
+7. **Always dark.** The whole app (glass, menus and dialogs) is forced to the
+   dark appearance and the palette is tuned for white text over tinted glass,
+   because video looks best in dark surroundings.
 8. **Both languages, always.** Every string exists in English and Russian
    (`mirage/i18n.py`).
 
@@ -142,14 +150,20 @@ Motion is short and quiet; it confirms an action and gets out of the way.
 | Button press feedback | 120 ms |
 | Toggles, segmented highlight | 160 ms |
 | Toast in / out | 220 ms / 160 ms |
-| Ambient glow cross-fade | about 0.6 s |
+| Ambient glow cross-fade | about 0.5 s while live, 0.6 s back to the idle glow |
+
+With **Reduce motion** turned on in macOS, button presses and toggles change
+instantly and toasts fade without sliding.
 
 ## Adding a glass panel
 
-1. Build the widget with a transparent background.
+1. Use a `GlassPanel` (`mirage/ui/widgets.py`), or any widget with a
+   transparent background.
 2. Register it with `glass.add(widget, radius)`, using a radius from
    `mirage/theme.py`.
 3. `GlassWindow.install()` runs once after the window is shown and creates the
-   native views; panels added later get their glass immediately.
+   native views; panels added later get their glass immediately. After it
+   runs, set `panel.native_glass = glass.native`, so the panel paints the
+   fallback fill only when there is no native glass.
 4. Check both paths: macOS 26+ with glass, and *Reduce transparency* turned on
    (which exercises the fallback).

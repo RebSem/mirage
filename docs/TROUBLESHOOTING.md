@@ -31,13 +31,18 @@ camera”*. To change your mind:
 2. If you started Mirage from a terminal (`make run`), macOS asks on behalf of
    the terminal app, so turn on **Terminal** (or iTerm, or whatever you use)
    instead.
-3. Press **Start** again. No need to restart Mirage.
+3. Press **Start** again. If Mirage still says no, quit and reopen it.
 
 If you see *“The camera didn't start”* or the preview stays empty, quit other
 apps that use the webcam (Zoom, FaceTime, Photo Booth) or switch them to
 *OBS Virtual Camera*, then press Start again. If you have more than one
 camera, also check that the right one is picked (see
 [The wrong camera is used](#the-wrong-camera-is-used)).
+
+If Mirage stops on its own and says *“The camera stopped sending video”*, the
+camera sent nothing for 5 seconds; for example, it was unplugged or another
+app took it over. Shorter gaps don't stop Mirage. Press **Start** again once
+the camera is back.
 
 ## OBS Virtual Camera is missing
 
@@ -73,9 +78,9 @@ If Mirage is live and Zoom still shows the logo, look at Mirage's top bar:
 ### “Nothing is reaching OBS Virtual Camera”
 
 Mirage shows this in its top bar (with a short toast) when it has been live
-for a few seconds but OBS's camera extension is not receiving its frames.
-Your preview keeps working; only the call misses out. Usually it is one of
-these:
+for a few seconds but still can't connect to OBS Virtual Camera, so no
+frames reach the call. Your preview keeps working; only the call misses out.
+Usually it is one of these:
 
 - **OBS is running its own virtual camera.** Only one app can feed it; click
   *Stop Virtual Camera* in OBS or quit OBS.
@@ -115,18 +120,25 @@ takes the largest). Use a photo that is:
 If the photo has several people, crop it to the one you want first. Very
 close-up portraits are fine.
 
+If Mirage says the file *isn't an image Mirage can read*, open it in Preview
+and export it as JPEG or PNG. JPEG, PNG, WebP, BMP, TIFF and iPhone HEIC
+photos all work.
+
 ## “Looking for your face…” while live
 
 Mirage cannot see your face on the camera right now. Face the camera, light
-your face from the front (a bright window behind you is the usual culprit)
-and move back a little if you are very close. The swap follows the largest
-face in view, so it will ignore a poster behind you.
+your face from the front (a bright window behind you is the usual culprit),
+and move back a little if you are very close, or closer if you sit far away.
+The swap follows the largest face in view, so it will ignore a poster behind
+you.
 
 ## The wrong camera is used
 
-Pick your camera in Mirage's **Camera** setting. Mirage remembers the choice
-by the camera's ID, so an iPhone with Continuity Camera turning up later does
-not steal the slot. OBS Virtual Camera is never offered as an input, because
+Pick your camera in the menu at the bottom left of Mirage's window, next to
+the camera icon (you can change it while Mirage is not live). The list is
+refreshed every time you open it. Mirage remembers the choice by the
+camera's ID, so an iPhone with Continuity Camera turning up later does not
+steal the slot. OBS Virtual Camera is never offered as an input, because
 Mirage writes to it.
 
 ## Face names reset to “Face”
@@ -136,8 +148,8 @@ Mirage keeps the list of your faces in `faces/index.json` inside
 crash or a full disk at the wrong moment), Mirage rebuilds the list from the
 saved face files the next time it starts. Your faces come back, in the order
 you added them, but their names reset to *Face*: right-click a face and
-choose **Rename…** to fix them. The damaged file is kept next to them as
-`faces/index.corrupt-<time>.json`, in case you want to copy the old names
+choose **Rename…** to fix them. The damaged file is kept in the same folder
+as `faces/index.corrupt-<time>.json`, in case you want to copy the old names
 from it.
 
 If the saved data of a single face is damaged, Mirage shows your real face
@@ -198,7 +210,8 @@ The [logs](#where-the-logs-are) say what went wrong.
 
 ## Where the logs are
 
-Mirage writes its logs to `~/Library/Logs/Mirage`. Open the folder with
+Mirage writes its logs to `~/Library/Logs/Mirage`: `mirage.log`, plus
+`launcher.log` when you start `Mirage.app`. Open the folder with
 **Help → Show Logs**, or from a terminal:
 
 ```bash
@@ -225,5 +238,5 @@ rm -rf ~/Library/Application\ Support/Mirage
 2. Delete the `mirage` folder you cloned (it holds the venv and the models).
 3. Delete `~/Library/Application Support/Mirage` and `~/Library/Logs/Mirage`.
 4. Delete `~/.insightface/models/buffalo_l` (the face detection models).
-5. Optionally, uninstall OBS and remove Mirage under **System Settings →
+5. Optionally, uninstall OBS and turn Mirage off under **System Settings →
    Privacy & Security → Camera**.

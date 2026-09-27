@@ -8,8 +8,8 @@ a few ground rules. They are short, and we mean them.
 
 - **Your face is yours; other faces are not.** Only use a real person's face if
   they said yes, and they know roughly how you are going to use it.
-- **Generated faces** (the 🎲 button) do not belong to anyone, which makes them
-  the easy, worry-free choice.
+- **Generated faces** (the 🎲 button) are not photos of real people, which
+  makes them the easy choice.
 - **Public figures are people too.** Being famous is not consent.
 
 ## Never use Mirage to

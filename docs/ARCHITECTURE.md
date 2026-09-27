@@ -33,19 +33,22 @@ camera frame:
 * **capture** (`mirage-capture`) reads the camera, keeps only the newest frame
   and survives short camera gaps; after 5 s without frames it stops the
   session with a toast.
-* **detect** (`mirage-detect`) finds the face on the newest frame with the
-  320 px detector on the GPU (CoreML `CPUAndGPU`), smooths the box and
-  keypoints between detections (`tracking.FaceSmoother`), adds mouth landmarks
-  only when *Keep my mouth* is on, and publishes the result. It is paced by the
-  quality preset: Fast waits 0.10 s between detections, Balanced 0.04 s, Best
-  runs back-to-back. It idles while you show your real face. With *Swap
-  everyone in view* it keeps every face instead of the largest one.
+* **detect** (`mirage-detect`) finds the largest face on the newest frame
+  with the 320 px detector on the GPU (CoreML `CPUAndGPU`), smooths its box
+  and keypoints from one detection to the next (`tracking.FaceSmoother`),
+  adds mouth landmarks only when *Keep my mouth* is on, and publishes the
+  result. It is paced by the quality preset: Fast starts a detection at most
+  every 0.10 s, Balanced every 0.04 s, Best runs them back-to-back. It idles
+  while you show your real face. With *Swap everyone in view* it keeps every
+  face (unsmoothed) instead of the largest one.
 * **process** (`mirage-process`) runs back-to-back on each new frame: swaps
   every face in the latest boxes with the current face *embedding*, applies
   post-processing and, on Best, the GPEN-BFR-256 enhancer, then sends the
   result to the virtual camera and offers it to the preview. It never dies on
-  a bad frame: it logs each new kind of error once, shows a toast and sends
+  a bad frame: it logs each new kind of error once (with a toast) and sends
   the plain camera frame instead.
+* With *Fix blue tint* on, both threads swap the red and blue channels of
+  each camera frame before using it.
 * Detection and swapping run in parallel, so the GPU and the Neural Engine are
   busy at the same time; in one loop each waited for the other (about 100 ms
   per frame instead of about 65 ms).
@@ -60,7 +63,7 @@ camera frame:
 |---|---|
 | `__init__.py` | `__version__`, `APP_NAME = "Mirage"`, `BUNDLE_ID = "io.github.rebsem.mirage"` |
 | `__main__.py` | `python -m mirage` entry |
-| `app.py` | QApplication setup, single instance, logging, signals, lifecycle, quit cleanup |
+| `app.py` | QApplication setup, single instance, logging, Qt's own strings in Russian, dark appearance, signals, quit cleanup |
 | `paths.py` | all filesystem locations (see below) |
 | `settings.py` | persisted user settings (JSON) |
 | `library.py` | face library: import photos, thumbnails, cached embeddings |
@@ -73,7 +76,7 @@ camera frame:
 | `demo.py` | a fake "Demo" camera (`python -m mirage --demo face.jpg`) |
 | `glass.py` | native Liquid Glass (`NSGlassEffectView`) behind Qt widgets |
 | `i18n.py` | UI strings, English + Russian |
-| `theme.py` | colours, radii, fonts, Qt style sheet |
+| `theme.py` | colours, radii, fonts, motion timings (off with Reduce motion), Qt style sheet |
 | `ui/` | main window and widgets |
 
 ### `paths.py`
@@ -90,7 +93,8 @@ All locations can be redirected with the `MIRAGE_HOME` environment variable
 | `repo_root()` | the checkout (parent of `mirage/`) |
 | `models_dir()` | `<repo_root>/models` |
 
-Every function creates the directory it returns (except `repo_root`).
+Each function creates the directory it returns; `settings_path()` creates
+the folder that holds the file, and `repo_root()` creates nothing.
 
 ### `settings.py`
 
@@ -116,7 +120,8 @@ def load(path: Path | None = None) -> Settings    # missing/corrupt file → def
 def save(settings: Settings, path: Path | None = None) -> None   # atomic write
 ```
 
-Unknown keys are ignored; out-of-range values are clamped/reset to defaults.
+Unknown keys are ignored; a value of the wrong type falls back to its
+default, and `opacity` and `sharpness` are clamped to 0..1.
 
 ### `library.py`
 
@@ -226,9 +231,9 @@ them to the UI thread.
 Methods (call them from the UI thread; only `shutdown()` blocks):
 
 * `prepare()`: load the models in the background at launch, so Start is quick.
-* `start(camera: CameraInfo)`: only from `idle`. A worker thread waits for the
-  models, asks macOS for camera access (and waits for the answer), opens the
-  camera and starts the three threads.
+* `start(camera: CameraInfo)`: only from `idle`. A worker thread loads the
+  models (or waits for the warm-up to finish), asks macOS for camera access
+  (and waits for the answer), opens the camera and starts the three threads.
 * `stop()`: `stopping`, then `idle` once the threads are down.
 * `shutdown()`: blocking stop for quitting; joins the threads for up to 6 s
   and never releases the camera under a blocked read.
@@ -246,12 +251,12 @@ the compute units on your Mac). Detection runs on the GPU in parallel.
 
 ### `app.py`: quitting
 
-`cleanup()` in `app.main()` saves the settings and calls `engine.shutdown()`, exactly once,
-whichever way Mirage ends: the window's `closeEvent` (through the `closing`
-signal), `aboutToQuit`, or `SIGINT` / `SIGTERM`. The `closeEvent` hook is the
-one that matters on macOS: `⌘Q` ends in `[NSApp terminate:]`, which exits the
-process without returning from `exec()` or emitting `aboutToQuit`, but Qt
-closes the windows first.
+`cleanup()` in `app.main()` saves the settings and calls `engine.shutdown()`,
+exactly once, whichever way Mirage ends: the window's `closeEvent` (through
+the `closing` signal), `aboutToQuit`, or `SIGINT` / `SIGTERM`. The
+`closeEvent` hook is the one that matters on macOS: `⌘Q` ends in
+`[NSApp terminate:]`, which exits the process without returning from
+`exec()` or emitting `aboutToQuit`, but Qt closes the windows first.
 
 ### `glass.py`
 
@@ -260,7 +265,9 @@ content view and a behind-window blur, then keeps one `NSGlassEffectView`
 per registered widget exactly behind that widget (tracking move/resize/show).
 An *ambient* layer (a heavily blurred, tiny copy of the live video) sits
 under the glass so the glass refracts the colours of your own video. On
-anything other than macOS 26+ (or with Reduce transparency on) the window is a plain opaque dark background and panels paint a subtle translucent fill.
+anything older than macOS 26, with Reduce transparency on, or if setting up
+the native views fails, `native` is `False`: the window paints a plain opaque
+dark background and the panels paint a subtle translucent fill.
 
 Native view order inside the window frame (bottom → top):
 `NSVisualEffectView` (behind-window blur) → ambient layer →
@@ -273,9 +280,10 @@ Native view order inside the window frame (bottom → top):
 * Faces are big round thumbnails; click or press `1`–`9` to switch, `0` for
   the real face. Drag photos in to add them.
 * Every state has words: *Loading models…*, *Starting camera…*,
-  *Live · 14 fps*, *Looking for your face…*, *Nothing is reaching OBS Virtual
-  Camera*.
-* No modal error dialogs during live; use glass toasts.
+  *Live · 14 fps*, *Stopping…*, *Models didn't load*, *Looking for your
+  face…*, *Nothing is reaching OBS Virtual Camera*.
+* No modal error dialogs during live; use glass toasts. The only dialogs are
+  the ones the user asks for (rename, confirm a removal).
 
 ## Tests
 

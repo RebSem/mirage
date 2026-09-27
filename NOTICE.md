@@ -19,14 +19,23 @@ source code of Mirage is available at <https://github.com/RebSem/mirage>.
   window, a face library with cached embeddings, quality presets, output to
   OBS Virtual Camera at a fixed 1280×720, keep-awake while live, a
   single-instance guard, clean start and quit, English and Russian UI.
+- **New:** `modules/virtualcam_out.py`, which sends live frames straight to
+  OBS Virtual Camera at a fixed 1280×720; both Mirage and the classic UI use
+  it.
 - **New:** `scripts/` (installer, `Mirage.app` bundle, icon, benchmark),
-  `tests/mirage/`, a `Makefile`, and the documentation in `docs/`,
-  `README.md`, `README.ru.md`, `CHANGELOG.md`, `CONTRIBUTING.md` and this file.
-- **Changed:** small, targeted fixes in the upstream engine under `modules/`:
-  live-mode stability, clean shutdown, camera selection on macOS, face
-  detection for close-up photos, background model loading, and running the
-  swap model on the Apple Neural Engine. [CHANGELOG.md](CHANGELOG.md) lists
-  them; `git log` has the details.
+  `tests/mirage/`, a `Makefile`, `requirements-dev.txt`, the app icon in
+  `assets/icon/`, GitHub issue templates and CI, and the documentation in
+  `docs/`, `README.md`, `README.ru.md`, `CHANGELOG.md`, `CONTRIBUTING.md` and
+  this file.
+- **Changed:** fixes in the upstream code under `modules/`, most of them in
+  the classic UI (`modules/ui.py`): a bad frame or a short camera gap no
+  longer ends live mode, no deadlock on a second Live click, clean shutdown,
+  camera selection on macOS, the largest face instead of the leftmost one,
+  face detection in close-up photos, background loading of the enhancers, a
+  working random face download, and running the swap model on the Apple
+  Neural Engine. `requirements.txt` adds pyvirtualcam and PyObjC and asks for
+  PySide6 6.9 or newer. [CHANGELOG.md](CHANGELOG.md) lists every fix; `git log`
+  has the details.
 - **Security:** model downloads verify TLS certificates, using certifi's CA
   bundle (`modules/model_downloader.py`, `modules/utilities.py`). Upstream
   turned certificate checks off on macOS, so a model file could have been
@@ -60,6 +69,7 @@ other way. If you need that, talk to the model authors first.
 | [OBS Studio](https://github.com/obsproject/obs-studio) | the *OBS Virtual Camera* device | GPL-2.0-or-later | separate app you install yourself (the installer can offer it); **not bundled** |
 | [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) | sending frames to OBS Virtual Camera | GPL-2.0 | optional runtime dependency, pip from PyPI into your local venv; **not bundled** |
 | [PySide6 / Qt for Python](https://pypi.org/project/PySide6/) | the user interface | LGPL-3.0 (also offered as GPL-2.0 / GPL-3.0 / commercial) | pip, from PyPI |
+| [PyObjC](https://github.com/ronaldoussoren/pyobjc) (Cocoa, Quartz, AVFoundation) | native Liquid Glass, the camera list and permission, keeping the Mac awake | MIT | pip, from PyPI |
 | [ONNX Runtime](https://github.com/microsoft/onnxruntime) | running the models (CoreML, Neural Engine) | MIT | pip, from PyPI |
 | [OpenCV](https://github.com/opencv/opencv) via [opencv-python](https://github.com/opencv/opencv-python) | camera capture and image processing | Apache-2.0 (OpenCV); the wheels bundle FFmpeg under LGPL-2.1 | pip, from PyPI |
 
@@ -119,6 +129,7 @@ Checked in September 2026. This is a good-faith summary, not legal advice.
 - pyvirtualcam, GPL-2.0: <https://github.com/letmaik/pyvirtualcam> and
   <https://pypi.org/project/pyvirtualcam/>
 - PySide6, LGPL-3.0 / GPL-2.0 / GPL-3.0: <https://pypi.org/project/PySide6/>
+- PyObjC, MIT: <https://github.com/ronaldoussoren/pyobjc>
 - ONNX Runtime, MIT: <https://github.com/microsoft/onnxruntime>
 - OpenCV, Apache-2.0: <https://github.com/opencv/opencv>; opencv-python wheels
   (MIT, bundled FFmpeg LGPL-2.1): <https://github.com/opencv/opencv-python>
