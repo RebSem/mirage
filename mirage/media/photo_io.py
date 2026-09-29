@@ -21,6 +21,7 @@ import re
 import secrets
 import stat
 import struct
+import threading
 import subprocess
 import sys
 import tempfile
@@ -332,6 +333,11 @@ def output_path(src: Path, ext: str | None = None) -> Path:
     raise AssertionError("unreachable")
 
 
+# Held while a file is being written. Quitting takes it (and keeps it), so the app can exit
+# at once mid-render without ever leaving a half-written temp file next to someone's photo.
+SAVE_LOCK = threading.Lock()
+
+
 def save_image(image_bgr: np.ndarray, src: Path, meta: PhotoMeta) -> Path:
     """Write the result next to `src` and return its path.
 
@@ -349,16 +355,17 @@ def save_image(image_bgr: np.ndarray, src: Path, meta: PhotoMeta) -> Path:
 
     # Hidden temp name in the same folder: O_EXCL, normal permissions, same volume.
     tmp = src.with_name(f".{src.stem}-mirage.{secrets.token_hex(4)}.tmp")
-    try:
-        with open(tmp, "xb") as fh:
-            img.save(fh, format=pil_format, **options)
-            fh.flush()
-            os.fsync(fh.fileno())
-        return _publish(tmp, src, ext)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            tmp.unlink()
-        raise
+    with SAVE_LOCK:
+        try:
+            with open(tmp, "xb") as fh:
+                img.save(fh, format=pil_format, **options)
+                fh.flush()
+                os.fsync(fh.fileno())
+            return _publish(tmp, src, ext)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+            raise
 
 
 def _output_ext(src: Path, fmt: str) -> str | None:

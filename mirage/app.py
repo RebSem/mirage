@@ -168,6 +168,14 @@ def main(argv: list[str] | None = None) -> int:
         window.media.shutdown()  # cancel a running render; a video deletes its partial file
         engine.shutdown()
         server.close()
+        if window.media.job_alive():
+            # A photo job can be inside a native call (a model compiling for the Neural
+            # Engine) that holds Python's lock for seconds, and Qt's own teardown would
+            # wait for it. Its result isn't wanted and nothing is being written (see
+            # MediaPage.shutdown), so leave now instead of looking frozen.
+            log.info("leaving without waiting for the photo job")
+            logging.shutdown()
+            os._exit(0)
 
     window.closing.connect(cleanup)
     app.aboutToQuit.connect(cleanup)

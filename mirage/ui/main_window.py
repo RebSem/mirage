@@ -134,8 +134,17 @@ class _TopBar(QWidget):
         w.raise_()
 
     def mousePressEvent(self, e) -> None:  # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton and self.window().windowHandle():
+        self._press = e.position() if e.button() == Qt.MouseButton.LeftButton else None
+
+    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+        # Drag the window only once the pointer really moves (a plain click is not a move).
+        press = getattr(self, "_press", None)
+        if press is not None and (e.position() - press).manhattanLength() > 3 and self.window().windowHandle():
+            self._press = None
             self.window().windowHandle().startSystemMove()
+
+    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+        self._press = None
 
 
 class MainWindow(QWidget):

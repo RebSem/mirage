@@ -885,9 +885,26 @@ class MediaPage(QWidget):
         else:
             self._renderer.release()
 
+    def job_alive(self) -> bool:
+        return self._job is not None and self._job.is_alive()
+
     def shutdown(self, timeout: float = 8.0) -> None:
-        """App is quitting: cancel a running job (a video removes its partial file) and wait."""
+        """App is quitting: cancel a running job without making the user wait for it.
+
+        A video render is waited for (briefly: cancelling takes well under a second)
+        because it deletes its unfinished file. A photo or batch job is mid-render
+        and its result isn't wanted any more, so the app doesn't wait for it; it
+        only makes sure no photo is being written right now (and none starts), so
+        nothing half-written is left next to the user's pictures.
+        """
         self._cancel.set()
         job = self._job
-        if job is not None and job.is_alive():
+        if job is None or not job.is_alive():
+            return
+        if self.kind == VIDEO:
             job.join(timeout)
+            return
+        from mirage.media import photo_io
+
+        if not photo_io.SAVE_LOCK.acquire(timeout=3.0):   # released only by the process exiting
+            log.warning("a photo was still being written at quit")
