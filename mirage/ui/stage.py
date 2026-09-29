@@ -133,11 +133,12 @@ class Stage(QWidget):
             self._chip(p, tr("no_face_in_view"), QPointF(r.center().x(), r.bottom() - m - CHIP_H), "center")
 
     def _centered_text(self, p: QPainter, r: QRectF, y: float, text: str, size: float,
-                       color: QColor, weight=theme.QFont.Weight.Normal) -> None:
+                       color: QColor, weight=theme.QFont.Weight.Normal, single_line: bool = False) -> None:
         p.setFont(theme.font(size, weight))
         p.setPen(color)
+        wrap = Qt.TextFlag.TextSingleLine if single_line else Qt.TextFlag.TextWordWrap
         p.drawText(QRectF(r.left() + 40, y, r.width() - 80, size * 2.2),
-                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap, text)
+                   Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | wrap, text)
 
     def _paint_idle(self, p: QPainter, r: QRectF) -> None:
         c = r.center()
@@ -150,10 +151,11 @@ class Stage(QWidget):
         title = tr("idle_title")
         if self.face_name:
             fm = QFontMetricsF(theme.font(19, theme.QFont.Weight.DemiBold))
-            room = r.width() - 80 - fm.horizontalAdvance(tr("idle_title_face", name=""))
+            room = r.width() - 80 - fm.horizontalAdvance(tr("idle_title_face", name="")) - 6  # kerning slack
             name = fm.elidedText(self.face_name, Qt.TextElideMode.ElideRight, max(40.0, room))
             title = tr("idle_title_face", name=name)
-        self._centered_text(p, r, c.y() + 2, title, 19, theme.TEXT, theme.QFont.Weight.DemiBold)
+        self._centered_text(p, r, c.y() + 2, title, 19, theme.TEXT, theme.QFont.Weight.DemiBold,
+                            single_line=bool(self.face_name))
         self._centered_text(p, r, c.y() + 38, tr("idle_subtitle"), 13, theme.TEXT_SECONDARY)
         self._centered_text(p, r, r.bottom() - 44, tr("idle_hint_keys"), 11.5, theme.TEXT_TERTIARY)
 
