@@ -78,7 +78,7 @@ fi
 
 # ── 1. system ───────────────────────────────────────────────────────────────
 step "Checking your Mac"
-[[ "$(uname -s)" == "Darwin" ]] || die "Mirage's installer is for macOS. On other systems follow the upstream Deep-Live-Cam README."
+[[ "$(uname -s)" == "Darwin" ]] || die "Mirage is for macOS on Apple Silicon. On other systems, use Deep-Live-Cam itself: https://github.com/hacksider/Deep-Live-Cam"
 ok "macOS $(sw_vers -productVersion 2>/dev/null || echo "?")"
 ARCH="$(uname -m)"
 if [[ "$ARCH" == "arm64" ]]; then
@@ -154,6 +154,14 @@ else
 fi
 VPY="$VENV/bin/python"
 
+# The engine moved from ./modules to third_party/deep-live-cam; after a pull git
+# leaves the old folder behind when only Python caches are left in it.
+if [[ -d "$REPO/modules" && ! -e "$REPO/modules/__init__.py" ]] &&
+   [[ -z "$(find "$REPO/modules" -type f ! -path '*/__pycache__/*' -print -quit)" ]]; then
+  rm -rf "$REPO/modules"
+  ok "Removed the old ./modules folder (the engine is in third_party/deep-live-cam now)"
+fi
+
 # ── 5. dependencies ─────────────────────────────────────────────────────────
 step "Installing Python packages"
 REQ_HASH="$(shasum -a 256 "$REPO/requirements.txt" | awk '{ print $1 }')"
@@ -179,8 +187,17 @@ fi
 
 # ── 6. models ───────────────────────────────────────────────────────────────
 step "Downloading models"
+# Models live in ./models; the engine in third_party/deep-live-cam reaches them
+# through its models -> ../../models link, which must not dangle.
+mkdir -p "$REPO/models"
+ENGINE_MODELS="$REPO/third_party/deep-live-cam/models"
+if [[ ! -e "$ENGINE_MODELS" && ! -L "$ENGINE_MODELS" ]]; then
+  ln -s ../../models "$ENGINE_MODELS"
+elif [[ ! -L "$ENGINE_MODELS" ]]; then
+  warn "third_party/deep-live-cam/models should be a link to ./models; move its files to ./models and run make install again."
+fi
 MODELS=("inswapper_128_fp16.onnx")
-# "Best" quality uses GPEN-BFR-256 (modules/processors/frame/face_enhancer_gpen256.py)
+# "Best" quality uses GPEN-BFR-256 (third_party/deep-live-cam/modules/processors/frame/face_enhancer_gpen256.py)
 if [[ $WITH_ENHANCER -eq 1 ]]; then MODELS+=("GPEN-BFR-256.onnx"); fi
 info "face swap: ${MODELS[*]}; face detection: buffalo_l"
 (
@@ -188,6 +205,7 @@ info "face swap: ${MODELS[*]}; face detection: buffalo_l"
   "$VPY" - "${MODELS[@]}" <<'PY'
 import sys
 
+import mirage  # noqa: F401  (puts the Deep-Live-Cam engine in third_party/ on sys.path)
 from modules.model_downloader import ensure_insightface_pack, ensure_model
 
 failed = [name for name in sys.argv[1:] if ensure_model(name) is None]
@@ -226,4 +244,4 @@ fi
 printf '\n%s✦ All set.%s Next steps:\n' "$GREEN$BOLD" "$RESET"
 printf '    %smake run%s          start Mirage from the terminal\n' "$BOLD" "$RESET"
 printf '    %smake app%s          build dist/Mirage.app (%smake install-app%s puts it in ~/Applications)\n' "$BOLD" "$RESET" "$BOLD" "$RESET"
-printf '    %smake classic%s      the original Deep-Live-Cam window\n\n' "$BOLD" "$RESET"
+printf '    %smake classic%s      the classic Deep-Live-Cam window (face mapping)\n\n' "$BOLD" "$RESET"

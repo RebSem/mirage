@@ -20,7 +20,7 @@ A short description. What did you expect instead?
 - Mac model (e.g. MacBook Air M1, 8 GB):
 - macOS version:
 - Mirage version (Mirage → About Mirage) or commit:
-- Started via: Mirage.app / `make run` / classic UI (`python run.py`)
+- Started via: Mirage.app / `make run` / classic window (`make classic`)
 - Video app, if relevant (Zoom, Meet, …):
 
 **Log**

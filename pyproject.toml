@@ -9,5 +9,5 @@ target-version = "py310"
 select = ["E701", "E711", "E712", "F401", "F541"]
 
 [tool.pytest.ini_options]
-pythonpath = ["."]
-testpaths = ["tests"]
+pythonpath = [".", "third_party/deep-live-cam"]
+testpaths = ["tests", "third_party/deep-live-cam/tests"]

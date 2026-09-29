@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# The Deep-Live-Cam engine is third-party code: keep it out of GitHub's
+# language statistics, so they show Mirage's own code
+third_party/** linguist-vendored

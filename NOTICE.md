@@ -1,19 +1,29 @@
 # Notice
 
-## This is a modified version of Deep-Live-Cam
+## Mirage and Deep-Live-Cam
 
-Mirage is a **modified version of
-[Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam)** by hacksider and
-contributors. It was forked from Deep-Live-Cam `main` (commit `759e3f9`) and
-modified by the Mirage contributors ([RebSem](https://github.com/RebSem)) in
-**September 2026**.
+Mirage's face-swap engine is
+**[Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam)** by hacksider
+and contributors, itself based on [roop](https://github.com/s0md3v/roop) by
+s0md3v. Mirage includes a **modified copy** of that engine in
+[`third_party/deep-live-cam/`](third_party/deep-live-cam/README.md). It was
+imported unchanged, in the repository's first commit, from Deep-Live-Cam
+`main` at commit
+[`759e3f9`](https://github.com/hacksider/Deep-Live-Cam/commit/759e3f985811985cf6c00a3e43e9579652c318f5),
+and has been modified by the Mirage contributors
+([RebSem](https://github.com/RebSem)) since **September 2026**.
 
 This notice is given under section 5(a) of the GNU Affero General Public
-License v3.0. Like the original, Mirage is released under the
+License v3.0. Like Deep-Live-Cam, Mirage is released under the
 [AGPL-3.0](LICENSE); the `LICENSE` file is unchanged from upstream. The complete
 source code of Mirage is available at <https://github.com/RebSem/mirage>.
 
 ### Summary of changes
+
+The [engine's README](third_party/deep-live-cam/README.md#what-mirage-changed)
+lists every changed engine file and what changed in it;
+[CHANGELOG.md](CHANGELOG.md) lists every fix, and `git log` has the details.
+In short:
 
 - **New:** the `mirage/` package, a macOS-first app with a native Liquid Glass
   window, a face library with cached embeddings, quality presets, output to
@@ -21,30 +31,39 @@ source code of Mirage is available at <https://github.com/RebSem/mirage>.
   single-instance guard, clean start and quit, English and Russian UI, and a
   Photos & videos mode that swaps faces in photo and video files
   (`mirage/media/`).
-- **New:** `modules/virtualcam_out.py`, which sends live frames straight to
-  OBS Virtual Camera at a fixed 1280×720; both Mirage and the classic UI use
-  it.
+- **New in the engine:** `third_party/deep-live-cam/modules/virtualcam_out.py`,
+  which sends live frames straight to OBS Virtual Camera at a fixed 1280×720;
+  both Mirage and the classic UI use it.
 - **New:** `scripts/` (installer, which also installs ffmpeg with Homebrew;
-  `Mirage.app` bundle, icon, benchmark),
+  `Mirage.app` bundle, icon, benchmark, engine update),
   `tests/mirage/`, a `Makefile`, `requirements-dev.txt`, the app icon in
   `assets/icon/`, GitHub issue templates and CI, and the documentation in
-  `docs/`, `README.md`, `README.ru.md`, `CHANGELOG.md`, `CONTRIBUTING.md` and
-  this file.
-- **Changed:** fixes in the upstream code under `modules/`, most of them in
-  the classic UI (`modules/ui.py`): a bad frame or a short camera gap no
-  longer ends live mode, no deadlock on a second Live click, clean shutdown,
-  camera selection on macOS, the largest face instead of the leftmost one,
-  face detection in close-up photos, background loading of the enhancers, a
-  working random face download, and running the swap model on the Apple
-  Neural Engine. `requirements.txt` adds pyvirtualcam and PyObjC and asks for
-  PySide6 6.9 or newer. [CHANGELOG.md](CHANGELOG.md) lists every fix; `git log`
-  has the details.
+  `docs/`, `README.md`, `README.ru.md`, `CHANGELOG.md`, `CONTRIBUTING.md`,
+  `third_party/deep-live-cam/README.md` and this file.
+- **Changed in the engine:** fixes in the code under
+  `third_party/deep-live-cam/modules/`, many of them in the classic UI
+  (`third_party/deep-live-cam/modules/ui.py`): a bad frame or a short camera
+  gap no longer ends live mode, no deadlock on a second Live click, clean
+  shutdown, camera selection on macOS, the largest face instead of the
+  leftmost one, face detection in close-up photos, background loading of the
+  enhancers, a working random face download, and running the swap model on
+  the Apple Neural Engine. `third_party/deep-live-cam/locales/ru.json`
+  completes the Russian translation of the classic UI.
+- **Changed:** `requirements.txt` adds pyvirtualcam and PyObjC, asks for
+  PySide6 6.9 or newer, and leaves out what Mirage doesn't use on Apple
+  Silicon: upstream's NSFW filter (opennsfw2, keras) and its Windows, Linux
+  and Intel Mac packages.
 - **Security:** model downloads verify TLS certificates, using certifi's CA
-  bundle (`modules/model_downloader.py`, `modules/utilities.py`). Upstream
-  turned certificate checks off on macOS, so a model file could have been
-  swapped on the way without anyone noticing.
-- **Moved:** the upstream README now lives in
-  [docs/upstream/README.md](docs/upstream/README.md).
+  bundle (`third_party/deep-live-cam/modules/model_downloader.py`,
+  `third_party/deep-live-cam/modules/utilities.py`). Upstream turned
+  certificate checks off on macOS, so a model file could have been swapped on
+  the way without anyone noticing.
+- **Moved and left out:** the engine moved from the top of the repository
+  into `third_party/deep-live-cam/` (its Python package is still called
+  `modules`). Upstream's README, demo images (`media/`) and Windows launchers
+  are not included; the READMEs link to
+  [upstream's README](https://github.com/hacksider/Deep-Live-Cam/blob/759e3f985811985cf6c00a3e43e9579652c318f5/README.md)
+  instead.
 
 The upstream copyright and license notices in the code are kept as they were.
 

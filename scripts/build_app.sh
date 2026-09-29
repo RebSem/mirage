@@ -20,6 +20,7 @@ The app stays tied to this folder: rebuild it if you move the checkout.
 
 Options:
   --install   also copy it to ~/Applications/Mirage.app (replacing any old copy)
+              and put a Mirage shortcut in this folder
   --help, -h  show this help
 EOF
 }
@@ -87,7 +88,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>
-	<string>Open source under AGPL-3.0. Built on Deep-Live-Cam.</string>
+	<string>© 2026 Mirage contributors. AGPL-3.0. Face-swap engine: Deep-Live-Cam by hacksider and contributors.</string>
 </dict>
 </plist>
 EOF
@@ -164,7 +165,12 @@ if [[ $INSTALL -eq 1 ]]; then
   if [[ -x "$LSREGISTER" ]]; then
     "$LSREGISTER" -f "$DEST"
   fi
-  printf '%s✓ Installed%s %s (find it in Launchpad or Spotlight)\n' "$GREEN$BOLD" "$RESET" "$DEST"
+  # A shortcut next to the code, so Mirage can be opened from the project folder too.
+  LINK="$REPO/Mirage.app"
+  if [[ -L "$LINK" || ! -e "$LINK" ]]; then
+    ln -sfn "$DEST" "$LINK"
+  fi
+  printf '%s✓ Installed%s %s (find it in Launchpad or Spotlight, or open Mirage in this folder)\n' "$GREEN$BOLD" "$RESET" "$DEST"
 else
   printf '  Open it with: open %s   or install it with: make install-app\n' "${APP#"$REPO"/}"
 fi

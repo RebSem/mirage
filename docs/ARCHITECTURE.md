@@ -1,18 +1,33 @@
 # Mirage architecture
 
-Mirage is a macOS-first frontend for real-time face swapping, built on top of
-the [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) engine. The
-upstream engine lives in `modules/` and stays close to upstream; everything
-Mirage adds lives in the `mirage/` package.
+Mirage is a macOS-first app for real-time face swapping, on video calls and
+in photos and videos. Its face-swap engine is
+[Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) by hacksider and
+contributors, kept in `third_party/deep-live-cam/` and close to upstream
+([its README](../third_party/deep-live-cam/README.md) lists Mirage's
+changes); everything Mirage adds lives in the `mirage/` package.
 
 ```
-run.py              upstream "classic" UI + CLI (still works)
-modules/            upstream engine: detection, face swap, enhancers
-mirage/             Mirage app (this document)
-scripts/            install, app bundle, icon, benchmark
-tests/mirage/       unit tests for mirage/ (no models, no camera needed)
-docs/               documentation
+mirage/                      Mirage app (this document)
+third_party/deep-live-cam/   the face-swap engine (Deep-Live-Cam with Mirage's fixes)
+  modules/                   detection, face swap, enhancers; imported as `modules`
+  locales/                   translations of the classic window
+  run.py                     the classic Deep-Live-Cam window + CLI (`make classic`)
+  tests/                     upstream's unit tests
+  models -> ../../models     link, so the engine finds the downloaded models
+  UPSTREAM_COMMIT            the upstream commit the engine is based on
+models/                      downloaded models (not in git)
+scripts/                     install, app bundle, icon, benchmark, engine update
+tests/mirage/                unit tests for mirage/ (no models, no camera needed)
+assets/icon/                 the app icon
+docs/                        documentation
 ```
+
+`mirage/__init__.py` puts `third_party/deep-live-cam` on `sys.path`, so
+`import modules` finds the engine without renaming its package (its code
+imports `modules.*` everywhere); `pyproject.toml` does the same for pytest.
+Code outside the `mirage` package that needs the engine, such as the model
+download step in `scripts/install.sh`, imports `mirage` first.
 
 ## Runtime picture
 
@@ -109,13 +124,13 @@ _on_analyzed, _on_rendered, …  ◄── Qt signals, queued: (token, result or
 
 | module | owns |
 |---|---|
-| `__init__.py` | `__version__`, `APP_NAME = "Mirage"`, `BUNDLE_ID = "io.github.rebsem.mirage"` |
+| `__init__.py` | `__version__`, `APP_NAME = "Mirage"`, `BUNDLE_ID = "io.github.rebsem.mirage"`, `REPO_URL`, `UPSTREAM_URL`; puts the engine (`third_party/deep-live-cam`) on `sys.path` |
 | `__main__.py` | `python -m mirage` entry |
 | `app.py` | QApplication setup, single instance, logging, Qt's own strings in Russian, dark appearance, signals, quit cleanup |
 | `paths.py` | all filesystem locations (see below) |
 | `settings.py` | persisted user settings (JSON) |
 | `library.py` | face library: import photos, thumbnails, cached embeddings |
-| `upstream.py` | configures the upstream engine once (CoreML, 320 px live detector) |
+| `upstream.py` | configures the Deep-Live-Cam engine once (CoreML, 320 px live detector) |
 | `faces_ai.py` | photo → `DetectedFace` (embedding, box, gender, age) with its own 640 px detector; random faces |
 | `camera.py` | camera discovery (AVFoundation order, uid → OpenCV index), OBS camera check |
 | `engine.py` | `LiveEngine`: capture, detect and process threads, virtual camera |
@@ -150,6 +165,12 @@ All locations can be redirected with the `MIRAGE_HOME` environment variable
 
 Each function creates the directory it returns; `settings_path()` creates
 the folder that holds the file, and `repo_root()` creates nothing.
+
+The engine works out its own models folder from where its code lives:
+`third_party/deep-live-cam/models`. That is a link to `<repo_root>/models`, so
+Mirage and the engine share one folder. `configure_upstream()` calls
+`models_dir()` before the engine loads anything, so the link never points at
+a missing folder.
 
 ### `settings.py`
 
@@ -248,8 +269,8 @@ Switching faces is instant because the engine only needs the cached
 `configure_upstream()` sets `modules.globals` for Mirage exactly once
 (idempotent, under a lock): headless, CoreML + CPU execution providers, only
 the face swapper as a frame processor, the classic UI's enhancers and face
-mapping off, and `det_size = 320` (`LIVE_DET_SIZE`). It must run before the
-upstream face analyser is first created, because insightface fixes the
+mapping off, and `det_size = 320` (`LIVE_DET_SIZE`). It must run before
+Deep-Live-Cam's face analyser is first created, because insightface fixes the
 detector size and providers at that point and the analyser is cached. The
 engine's model loading and `faces_ai.embed` both call it first. Faces on a
 webcam are big, so 320 px is enough: about 9 ms per detection on M1 instead
@@ -261,10 +282,11 @@ of about 26 ms at 640.
 CPU (`det_10g.onnx` from `buffalo_l`), not the live one: photos can have
 small faces, and an import can afford about 100 ms. It takes the largest
 face, retries with a dark border (30 %, 60 %) for close-ups, gets the
-embedding from the upstream recognition model, estimates gender and age with
-`genderage.onnx` on the CPU (used for suggestions in Photos & videos) and
-maps the box back to the original image coordinates. `fetch_random_face()` downloads a generated face
-from thispersondoesnotexist.com.
+embedding from InsightFace's recognition model (ArcFace from `buffalo_l`),
+estimates gender and age with `genderage.onnx` on the CPU (used for
+suggestions in Photos & videos) and maps the box back to the original image
+coordinates. `fetch_random_face()` downloads a generated face from
+thispersondoesnotexist.com.
 
 ### `camera.py`
 
@@ -367,4 +389,9 @@ virtual-camera frame fit, i18n key parity, landmark smoothing, the media
 plan and suggestions, the batch runner with fakes, photo loading and saving
 (orientation, HEIC, EXIF, naming), and the video reader, writer, tracker and
 render with fake models. The video tests that need ffmpeg are skipped when
-it isn't installed.
+it isn't installed. `test_engine_layout.py` checks where the engine lives
+and that importing `mirage` makes it importable.
+
+The engine's own upstream tests live in `third_party/deep-live-cam/tests/`;
+they stub out the heavy imports and need no models either. `make test` and
+CI run both folders.

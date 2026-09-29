@@ -3,6 +3,6 @@ contact_links:
   - name: Troubleshooting guide
     url: https://github.com/RebSem/mirage/blob/main/docs/TROUBLESHOOTING.md
     about: Camera permission, OBS Virtual Camera, low fps, install errors.
-  - name: Problems in the classic Deep-Live-Cam UI or engine
-    url: https://github.com/hacksider/Deep-Live-Cam/issues
-    about: If it also happens in upstream Deep-Live-Cam, please report it there too.
+  - name: Responsible use
+    url: https://github.com/RebSem/mirage/blob/main/docs/RESPONSIBLE_USE.md
+    about: What Mirage is for, and what it won't help with.

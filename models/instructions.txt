@@ -1,4 +1,21 @@
-just put the models in this folder -
+Mirage keeps its downloaded models in this folder. You normally don't need to
+do anything here: `make install` downloads the face swap model, and Mirage
+downloads the face enhancers the first time they are needed.
 
+Files that go here:
+  inswapper_128_fp16.onnx   the face swap model (make install)
+  GPEN-BFR-256.onnx         face enhancement for Best and videos
+                            (or ahead of time: scripts/install.sh --with-enhancer)
+  gfpgan-1024.onnx          face enhancement for photos, and in the classic window
+Mirage also writes CoreML-optimised copies next to them (*_coreml*.onnx).
+
+The face detection models (buffalo_l) go to ~/.insightface/models instead.
+
+To download the main files by hand, put them here:
 https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx?download=true
 https://huggingface.co/hacksider/deep-live-cam/resolve/main/gfpgan-1024.onnx?download=true
+
+The engine in third_party/deep-live-cam finds this folder through its
+`models` link. The models are not covered by Mirage's AGPL license and are for
+non-commercial use only (see NOTICE.md); never commit them. Keep this file:
+it makes sure the folder exists in a fresh clone.

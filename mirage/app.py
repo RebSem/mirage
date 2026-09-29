@@ -90,7 +90,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _setup_logging(args.debug)
     _brand_process()
-    os.chdir(paths.repo_root())  # upstream code resolves models/ relative to the checkout
+    os.chdir(paths.repo_root())  # a stable working directory (the engine's own files are found via __file__)
 
     from PySide6.QtCore import QTimer
     from PySide6.QtGui import QIcon

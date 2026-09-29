@@ -25,6 +25,11 @@ def configure_upstream() -> None:
         import onnxruntime
 
         import modules.globals as G
+        from mirage import paths
+
+        # The engine finds its models through third_party/deep-live-cam/models,
+        # a link to <repo>/models; make sure the folder it points at exists.
+        paths.models_dir()
 
         G.headless = True
         G.det_size = LIVE_DET_SIZE

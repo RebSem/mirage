@@ -18,21 +18,19 @@ venv/
 env/
 workflow/
 gfpgan/
-models/inswapper_128.onnx
-models/GFPGANv1.4.pth
 *.onnx
-models/DMDNet.pth
 faceswap/
 .vscode/
 switch_states.json
 /models
-install.bat
+# (third_party/deep-live-cam/models is a tracked link to ./models, and models/instructions.txt
+# is tracked on purpose so the folder exists in a fresh clone)
 /.claude
-*.bat
 
-# Mirage build output
+# Mirage build output, and the shortcut make install-app puts here
 dist/
 build/
+/Mirage.app
 
 # Tracked images despite the "*.png" rule above (Mirage.icns is tracked too)
 !assets/**/*.png

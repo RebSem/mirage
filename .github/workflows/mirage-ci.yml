@@ -26,6 +26,6 @@ jobs:
       - name: Install test dependencies
         run: python -m pip install numpy opencv-python-headless pillow pytest "ruff==0.15.7"
       - name: Ruff
-        run: ruff check --output-format=github mirage tests/mirage
+        run: ruff check --output-format=github mirage tests scripts third_party
       - name: Pytest
-        run: python -m pytest -q tests/mirage
+        run: python -m pytest -q tests/mirage third_party/deep-live-cam/tests
