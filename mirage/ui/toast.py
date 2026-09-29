@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QWidget
 
 from mirage import theme
 
-LEVEL_COLOR = {"info": theme.ACCENT_2, "warn": theme.WARN, "error": theme.LIVE}
+LEVEL_COLOR = {"info": theme.ACCENT_2, "success": theme.READY, "warn": theme.WARN, "error": theme.LIVE}
 LEVEL_SECONDS = {"info": 3.2, "warn": 5.0, "error": 7.0}
 MAX_WIDTH = 460
 MAX_TOASTS = 3
@@ -71,7 +71,8 @@ class _Toast(QWidget):
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         p.setPen(QPen(QColor(255, 255, 255, 45), 1))
         p.setBrush(QColor(22, 22, 32, 225))
-        p.drawRoundedRect(r, 16, 16)
+        rad = min(r.height() / 2, 20)   # one line: a true capsule
+        p.drawRoundedRect(r, rad, rad)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(LEVEL_COLOR.get(self.level, theme.ACCENT_2))
         p.drawEllipse(QRectF(r.left() + 16, r.center().y() - 4, 8, 8))
@@ -116,7 +117,8 @@ class ToastHost(QWidget):
         self.layout_toasts()
 
     def layout_toasts(self) -> None:
-        y = self.height() - 64
+        # Inside the stage, clear of the control bar and of the stage's own bottom chips.
+        y = self.height() - theme.CONTROL_BAR_HEIGHT - theme.GAP - 8 - 56
         for t in reversed(self._toasts):
             x = (self.width() - t.width()) // 2
             offset = int((1 - t._t) * theme.TOAST_SLIDE_PX)

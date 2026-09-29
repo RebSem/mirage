@@ -10,8 +10,8 @@ from PySide6.QtGui import QColor, QFont
 
 # ── colour ───────────────────────────────────────────────────────────────
 TEXT = QColor(255, 255, 255, 235)
-TEXT_SECONDARY = QColor(255, 255, 255, 150)
-TEXT_TERTIARY = QColor(255, 255, 255, 95)
+TEXT_SECONDARY = QColor(255, 255, 255, 172)
+TEXT_TERTIARY = QColor(255, 255, 255, 122)
 HAIRLINE = QColor(255, 255, 255, 38)
 ACCENT = QColor("#8B7CFF")            # soft violet
 ACCENT_2 = QColor("#5AC8FA")          # Apple-ish teal-blue for gradients
@@ -28,7 +28,7 @@ WINDOW_MIN = (1040, 680)
 WINDOW_DEFAULT = (1240, 780)
 MARGIN = 16
 GAP = 14
-RADIUS_PANEL = 28
+RADIUS_PANEL = 30
 RADIUS_STAGE = 30
 RADIUS_BAR = 30
 SIDEBAR_WIDTH = 332
@@ -79,6 +79,7 @@ QToolTip {{
 QLabel#sectionTitle {{ color: {rgba(TEXT)}; }}
 QLabel#hint {{ color: {rgba(TEXT_SECONDARY)}; }}
 QLabel#faint {{ color: {rgba(TEXT_TERTIARY)}; }}
+QLabel:disabled {{ color: {rgba(TEXT_TERTIARY)}; }}
 
 QSlider::groove:horizontal {{
     height: 4px; border-radius: 2px; background: rgba(255,255,255,0.16);
@@ -91,13 +92,16 @@ QSlider::handle:horizontal {{
     width: 18px; height: 18px; margin: -7px 0; border-radius: 9px;
     background: white; border: 0.5px solid rgba(0,0,0,0.15);
 }}
+QSlider::handle:horizontal:disabled {{ background: rgba(255,255,255,0.45); }}
+QSlider::sub-page:horizontal:disabled {{ background: rgba(255,255,255,0.22); }}
 
 QComboBox {{
     background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 14px; padding: 6px 30px 6px 12px; min-height: 18px;
+    border-radius: 17px; padding: 6px 30px 6px 14px; min-height: 22px;
 }}
 QComboBox:hover {{ background: rgba(255,255,255,0.15); }}
-QComboBox::drop-down {{ border: none; width: 26px; }}
+QComboBox::drop-down {{ border: none; width: 28px; }}
+QComboBox::down-arrow {{ image: none; width: 0; }}
 QComboBox QAbstractItemView {{
     background: rgba(28, 28, 36, 0.98); border: 1px solid rgba(255,255,255,0.12);
     border-radius: 10px; padding: 4px; selection-background-color: {ACCENT.name()};

@@ -105,19 +105,20 @@ class FaceTile(QWidget):
             p.drawEllipse(disc)
             icon = {ME: "person", ADD: "plus", RANDOM: "dice"}.get(self.face_id)
             if icon:
-                draw_icon(p, icon, disc.adjusted(21, 21, -21, -21), QColor(255, 255, 255, 220))
+                inset = DISC * 0.31
+                draw_icon(p, icon, disc.adjusted(inset, inset, -inset, -inset), QColor(255, 255, 255, 220))
             elif self.face_id == BUSY:
                 p.setPen(QPen(QColor(255, 255, 255, 220), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
                 p.drawArc(disc.adjusted(24, 24, -24, -24), int(-self._spin * 16), 100 * 16)
 
         if self.number is not None:
-            badge = QRectF(0, 0, 20, 20)
-            badge.moveCenter(QPointF(disc.right() - 6, disc.top() + 6))
-            p.setPen(QPen(QColor(255, 255, 255, 60), 1))
-            p.setBrush(QColor(20, 20, 30, 200))
+            badge = QRectF(0, 0, 19, 19)
+            badge.moveCenter(QPointF(disc.right() - 3, disc.top() + 3))
+            p.setPen(QPen(QColor(24, 22, 36, 235), 2.5))   # a cut-out edge where it crosses the ring
+            p.setBrush(QColor(255, 255, 255, 235) if self.selected else QColor(28, 28, 40, 235))
             p.drawEllipse(badge)
-            p.setPen(theme.TEXT)
-            p.setFont(theme.font(10.5, theme.QFont.Weight.DemiBold))
+            p.setPen(QColor(20, 20, 30) if self.selected else theme.TEXT)
+            p.setFont(theme.font(10, theme.QFont.Weight.Bold))
             p.drawText(badge, Qt.AlignmentFlag.AlignCenter, str(self.number))
 
         p.setFont(theme.font(11.5, theme.QFont.Weight.DemiBold if self.selected else theme.QFont.Weight.Normal))
@@ -156,9 +157,9 @@ class FaceGrid(QWidget):
             tile.menuRequested.connect(self.menuRequested)
             self._grid.addWidget(tile, i // COLUMNS, i % COLUMNS, Qt.AlignmentFlag.AlignHCenter)
             tile.show()
-        self._grid.setRowStretch(len(tiles) // COLUMNS + 1, 1)
         self._tiles = tiles
         self.set_selected(selected)
+        self.updateGeometry()
 
     def set_selected(self, face_id: str | None) -> None:
         target = face_id or ME

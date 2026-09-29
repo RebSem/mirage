@@ -8,7 +8,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QPointF, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QMenuBar,
     QMessageBox,
     QScrollArea,
+    QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -39,7 +40,7 @@ from mirage.ui.look import LookPanel
 from mirage.ui.media_page import MediaPage
 from mirage.ui.stage import Stage
 from mirage.ui.toast import ToastHost
-from mirage.ui.widgets import GlassPanel, IconButton, PrimaryButton, Segmented, StatusPill
+from mirage.ui.widgets import ControlBar, GlassPanel, IconButton, PrimaryButton, Segmented, StatusPill
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ AMBIENT_EVERY_S = 0.35
 
 
 class _CameraCombo(QComboBox):
-    """Re-reads the camera list whenever the dropdown opens."""
+    """Re-reads the camera list whenever the dropdown opens; draws its own chevron."""
 
     aboutToShow = Signal()
 
@@ -58,9 +59,79 @@ class _CameraCombo(QComboBox):
         self.aboutToShow.emit()
         super().showPopup()
 
+    def paintEvent(self, e) -> None:  # noqa: N802
+        super().paintEvent(e)
+        from PySide6.QtGui import QPainter, QPen
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = theme.TEXT_SECONDARY if self.isEnabled() else theme.TEXT_TERTIARY
+        p.setPen(QPen(color, 1.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        cx, cy = self.width() - 17.0, self.height() / 2
+        p.drawPolyline([QPointF(cx - 4.5, cy - 2), QPointF(cx, cy + 2.5), QPointF(cx + 4.5, cy - 2)])
+
+
+class _FitScroll(QScrollArea):
+    """A scroll area as tall as its content (so what follows sits right under it),
+    which only starts scrolling when the window is too short."""
+
+    def setWidget(self, widget: QWidget) -> None:  # noqa: N802
+        super().setWidget(widget)
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self.widget() and event.type() == QEvent.Type.LayoutRequest:
+            self.updateGeometry()   # faces added or removed: take the new height
+        return super().eventFilter(obj, event)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        inner = self.widget().sizeHint() if self.widget() else QSize(0, 0)
+        return QSize(inner.width(), inner.height() + 2 * self.frameWidth())
+
 
 class _TopBar(QWidget):
-    """Title row that also drags the window (the title bar is transparent)."""
+    """Title row that also drags the window (the title bar is transparent).
+
+    The mode switch sits in the middle of the window, like a native toolbar
+    control, and stays put when the status text next to the title changes.
+    """
+
+    GAP = 16
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.center: QWidget | None = None
+        self.left_edge: QWidget | None = None     # the switch keeps clear of these
+        self.right_edge: list[QWidget] = []
+
+    def set_center(self, widget: QWidget, left_edge: QWidget, right_edge: list[QWidget]) -> None:
+        self.center, self.left_edge, self.right_edge = widget, left_edge, right_edge
+        widget.setParent(self)
+        for w in [left_edge, *right_edge]:
+            w.installEventFilter(self)
+        self.place_center()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if event.type() in (QEvent.Type.Resize, QEvent.Type.Move, QEvent.Type.Show, QEvent.Type.Hide):
+            QTimer.singleShot(0, self.place_center)
+        return False
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self.place_center()
+
+    def place_center(self) -> None:
+        w = self.center
+        if w is None:
+            return
+        middle = self.mapFrom(self.window(), QPoint(self.window().width() // 2, 0)).x()
+        x = middle - w.width() // 2
+        lo = self.left_edge.geometry().right() + self.GAP if self.left_edge else 0
+        shown = [r for r in self.right_edge if r.isVisible()]
+        hi = (min(r.geometry().left() for r in shown) if shown else self.width()) - self.GAP - w.width()
+        x = max(lo, min(x, hi)) if hi >= lo else lo
+        w.move(x, (self.height() - w.height()) // 2)
+        w.raise_()
 
     def mousePressEvent(self, e) -> None:  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton and self.window().windowHandle():
@@ -144,7 +215,7 @@ class MainWindow(QWidget):
         top.setFixedHeight(theme.TITLEBAR_HEIGHT)  # vertically centred on the traffic lights
         tl = QHBoxLayout(top)
         tl.setContentsMargins(theme.TRAFFIC_LIGHTS_SPACE, 0, 4, 0)
-        tl.setSpacing(12)
+        tl.setSpacing(10)
         title = QLabel(mirage.APP_NAME)
         title.setFont(theme.font(15, theme.QFont.Weight.Bold))
         self.status = StatusPill()
@@ -152,19 +223,18 @@ class MainWindow(QWidget):
         self.vcam_label = QLabel()
         self.vcam_label.setObjectName("hint")
         self.vcam_label.setFont(theme.font(12))
-        help_btn = IconButton("help", tr("vcam_help"), 26)
-        help_btn.clicked.connect(self._open_vcam_help)
+        self.help_btn = IconButton("help", tr("vcam_help"), 24)
+        self.help_btn.clicked.connect(self._open_vcam_help)
         tl.addWidget(title)
         tl.addWidget(self.status)
-        tl.addSpacing(8)
-        self.mode_switch = Segmented([(LIVE, tr("mode_live")), (MEDIA, tr("mode_media"))])
-        self.mode_switch.setFixedWidth(260)
-        self.mode_switch.setFixedHeight(30)
-        self.mode_switch.changed.connect(self._set_mode)
-        tl.addWidget(self.mode_switch)
         tl.addStretch(1)
         tl.addWidget(self.vcam_label)
-        tl.addWidget(help_btn)
+        tl.addWidget(self.help_btn)
+        self.mode_switch = Segmented([(LIVE, tr("mode_live")), (MEDIA, tr("mode_media"))])
+        self.mode_switch.setFixedSize(248, 28)
+        self.mode_switch.changed.connect(self._set_mode)
+        top.set_center(self.mode_switch, self.status, [self.vcam_label, self.help_btn])
+        self._top = top
         root.addWidget(top)
 
         body = QHBoxLayout()
@@ -188,14 +258,12 @@ class MainWindow(QWidget):
         sf.addWidget(self.stage)
         left.addWidget(self.stage_frame, 1)
 
-        self.bar = GlassPanel(theme.RADIUS_BAR)
-        self.bar.setFixedHeight(theme.CONTROL_BAR_HEIGHT)
-        bl = QHBoxLayout(self.bar)
-        bl.setContentsMargins(18, 0, 18, 0)
-        bl.setSpacing(12)
-        cam_icon = IconButton("camera", tr("camera"), 30)
-        cam_icon.setEnabled(False)
+        self.bar = ControlBar(theme.RADIUS_BAR, theme.CONTROL_BAR_HEIGHT)
+        cam_icon = IconButton("camera", tr("camera"), 36)
+        cam_icon.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)  # a label, not a button
+        cam_icon.setCursor(Qt.CursorShape.ArrowCursor)
         self.camera_combo = _CameraCombo()
+        self.camera_combo.setFixedHeight(36)
         self.camera_combo.setMinimumWidth(190)
         self.camera_combo.setMaximumWidth(260)
         self.camera_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -207,22 +275,17 @@ class MainWindow(QWidget):
         self.mirror_btn.setCheckable(True)
         self.mirror_btn.setChecked(self.settings.mirror_preview)
         self.mirror_btn.toggled.connect(lambda on: self._set("mirror_preview", on))
-        bl.addWidget(cam_icon)
-        bl.addWidget(self.camera_combo)
-        bl.addStretch(1)
-        bl.addWidget(self.primary)
-        bl.addStretch(1)
-        right_spacer = QWidget()
-        right_spacer.setFixedWidth(cam_icon.width() + self.camera_combo.minimumWidth() - self.mirror_btn.width())
-        bl.addWidget(right_spacer)
-        bl.addWidget(self.mirror_btn)
+        self.bar.left.addWidget(cam_icon)
+        self.bar.left.addWidget(self.camera_combo)
+        self.bar.right.addWidget(self.mirror_btn)
+        self.bar.set_center(self.primary)
         left.addWidget(self.bar)
 
         self.sidebar = GlassPanel(theme.RADIUS_PANEL)
         self.sidebar.setFixedWidth(theme.SIDEBAR_WIDTH)
         sl = QVBoxLayout(self.sidebar)
         sl.setContentsMargins(18, 18, 18, 16)
-        sl.setSpacing(10)
+        sl.setSpacing(12)
         faces_title = QLabel(tr("faces"))
         faces_title.setObjectName("sectionTitle")
         faces_title.setFont(theme.font(15, theme.QFont.Weight.Bold))
@@ -231,13 +294,14 @@ class MainWindow(QWidget):
         self.grid = FaceGrid()
         self.grid.picked.connect(self._on_tile)
         self.grid.menuRequested.connect(self._face_menu)
-        scroll = QScrollArea()
+        scroll = _FitScroll()
+        scroll.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setWidget(self.grid)
         scroll.viewport().setAutoFillBackground(False)
-        sl.addWidget(scroll, 1)
+        sl.addWidget(scroll)
 
         self.empty_hint = QLabel(tr("empty_library"))
         self.empty_hint.setObjectName("hint")
@@ -248,7 +312,9 @@ class MainWindow(QWidget):
         divider = QFrame()
         divider.setFixedHeight(1)
         divider.setStyleSheet(f"background: {theme.rgba(theme.HAIRLINE)};")
+        sl.addSpacing(4)
         sl.addWidget(divider)
+        sl.addSpacing(4)
 
         look_title = QLabel(tr("look"))
         look_title.setObjectName("sectionTitle")
@@ -257,6 +323,7 @@ class MainWindow(QWidget):
         self.look = LookPanel(self.settings)
         self.look.changed.connect(self._set)
         sl.addWidget(self.look)
+        sl.addStretch(1)   # the panel reads top-down; opening options grows it downwards, nothing jumps
         body.addWidget(self.sidebar)
 
         self.media = MediaPage(self)
@@ -360,6 +427,16 @@ class MainWindow(QWidget):
         self.camera_combo.setEnabled(state == eng.IDLE)
         self._vcam_installed = cameras.virtual_camera_installed()
         self._refresh_vcam_hint()
+        self._refresh_top_bar()
+
+    def _refresh_top_bar(self) -> None:
+        """The status pill and the virtual camera hint are about calls: in Photos & videos
+        they only show while a call is running in the background."""
+        on_call = self.engine.state in (eng.LIVE, eng.STARTING)
+        media = self.mode == MEDIA
+        self.status.setVisible(not media or on_call)
+        self.vcam_label.setVisible(not media or on_call)
+        self.help_btn.setVisible(not media)
 
     def _on_preview(self) -> None:
         frame = self.engine.take_preview()
@@ -444,6 +521,7 @@ class MainWindow(QWidget):
             pix = QPixmap(str(self.library.thumb_path(entry.id)))
             faces.append((entry.id, entry.name, pix))
         self.grid.rebuild(faces, self.settings.face_id, self._busy_imports)
+        self.grid.parentWidget().parentWidget().updateGeometry()   # the _FitScroll around the grid
         self.empty_hint.setVisible(not faces)
 
     def _on_tile(self, face_id: str) -> None:
@@ -525,6 +603,7 @@ class MainWindow(QWidget):
             if stored is not None and self.settings.face_id == face_id:
                 self.stage.face_name = stored.name
                 self.stage.update()
+            self.media.on_library_changed()
 
     def _reveal(self, face_id: str) -> None:
         import subprocess
@@ -593,10 +672,10 @@ class MainWindow(QWidget):
             elif kind == "failed":
                 self.toast(tr("toast_import_failed", name=payload), "error")
         if len(added) == 1:
-            self.toast(tr("toast_added", name=added[0].name))
+            self.toast(tr("toast_added", name=added[0].name), "success")
             self._on_tile(added[0].id)
         elif len(added) > 1:
-            self.toast(tr("toast_added_many", n=len(added)))
+            self.toast(tr("toast_added_many", n=len(added)), "success")
             self._on_tile(added[-1].id)
 
     def random_face(self) -> None:
@@ -695,6 +774,9 @@ class MainWindow(QWidget):
         self.pages.setCurrentWidget(self.media if mode == MEDIA else self.pages.widget(0))
         self.grid.set_selected(self.media.selected_id if mode == MEDIA else self.settings.face_id)
         self.mode_switch.set_value(mode, animate=False)
+        self.look.set_context(mode)
+        self.look.setEnabled(mode == LIVE or not self.media.busy)
+        self._refresh_top_bar()
         self._space.setEnabled(mode == LIVE)  # in Photos & videos Space means "hold to compare"
         self.toasts.sync_geometry()
         if self.settings.mode != mode:
@@ -726,6 +808,8 @@ class MainWindow(QWidget):
         self.settings = replace(self.settings, **{field: value})
         if field in ("quality", "opacity", "sharpness", "mouth_mask", "many_faces", "color_fix", "poisson_blend"):
             self.engine.apply(self.settings)
+        if self.mode == MEDIA and field in ("opacity", "sharpness", "mouth_mask", "poisson_blend"):
+            self.media.look_changed()
         if field == "mirror_preview":
             self.stage.mirror = bool(value)
             self.stage.update()

@@ -6,12 +6,12 @@ import time
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFontMetricsF, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from mirage import theme
 from mirage.i18n import tr
-from mirage.ui.widgets import draw_icon
+from mirage.ui.widgets import CHIP_H, chip_width, draw_chip, draw_icon
 
 NO_FACE_GRACE_S = 1.0  # don't flash "looking for your face" on a single missed detection
 
@@ -117,23 +117,9 @@ class Stage(QWidget):
 
     def _chip(self, p: QPainter, text: str, anchor: QPointF, align: str, dot: QColor | None = None,
               bold: bool = False) -> None:
-        p.setFont(theme.font(12, theme.QFont.Weight.DemiBold if bold else theme.QFont.Weight.Medium))
-        tw = p.fontMetrics().horizontalAdvance(text)
-        w = tw + 24 + (14 if dot else 0)
-        h = 28.0
+        w = chip_width(text, dot=dot is not None, strong=bold)
         x = anchor.x() if align == "left" else (anchor.x() - w if align == "right" else anchor.x() - w / 2)
-        rect = QRectF(x, anchor.y(), w, h)
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
-        p.setBrush(QColor(12, 12, 20, 150))
-        p.drawRoundedRect(rect, h / 2, h / 2)
-        tx = rect.left() + 12
-        if dot:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(dot)
-            p.drawEllipse(QPointF(tx + 4, rect.center().y()), 4, 4)
-            tx += 14
-        p.setPen(theme.TEXT)
-        p.drawText(QRectF(tx, rect.top(), tw + 4, h), Qt.AlignmentFlag.AlignVCenter, text)
+        draw_chip(p, x, anchor.y(), text, dot=dot, strong=bold)
 
     def _paint_overlays(self, p: QPainter, r: QRectF) -> None:
         m = 16
@@ -141,10 +127,10 @@ class Stage(QWidget):
         if self.show_fps:
             self._chip(p, tr("status_fps", fps=self.fps), QPointF(r.right() - m, r.top() + m), "right")
         if self.face_name:
-            self._chip(p, self.face_name, QPointF(r.left() + m, r.bottom() - m - 28), "left")
+            self._chip(p, self.face_name, QPointF(r.left() + m, r.bottom() - m - CHIP_H), "left")
         missing = self._face_missing_since
         if missing is not None and time.monotonic() - missing > NO_FACE_GRACE_S:
-            self._chip(p, tr("no_face_in_view"), QPointF(r.center().x(), r.bottom() - m - 28), "center")
+            self._chip(p, tr("no_face_in_view"), QPointF(r.center().x(), r.bottom() - m - CHIP_H), "center")
 
     def _centered_text(self, p: QPainter, r: QRectF, y: float, text: str, size: float,
                        color: QColor, weight=theme.QFont.Weight.Normal) -> None:
@@ -161,7 +147,13 @@ class Stage(QWidget):
         p.setBrush(QColor(255, 255, 255, 22))
         p.drawEllipse(disc)
         draw_icon(p, "camera", disc.adjusted(24, 24, -24, -24), QColor(255, 255, 255, 220))
-        self._centered_text(p, r, c.y() + 2, tr("idle_title"), 19, theme.TEXT, theme.QFont.Weight.DemiBold)
+        title = tr("idle_title")
+        if self.face_name:
+            fm = QFontMetricsF(theme.font(19, theme.QFont.Weight.DemiBold))
+            room = r.width() - 80 - fm.horizontalAdvance(tr("idle_title_face", name=""))
+            name = fm.elidedText(self.face_name, Qt.TextElideMode.ElideRight, max(40.0, room))
+            title = tr("idle_title_face", name=name)
+        self._centered_text(p, r, c.y() + 2, title, 19, theme.TEXT, theme.QFont.Weight.DemiBold)
         self._centered_text(p, r, c.y() + 38, tr("idle_subtitle"), 13, theme.TEXT_SECONDARY)
         self._centered_text(p, r, r.bottom() - 44, tr("idle_hint_keys"), 11.5, theme.TEXT_TERTIARY)
 

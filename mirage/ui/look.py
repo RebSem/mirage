@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QLabel, QSlider, QVBoxLayout, QWidget
 from mirage import theme
 from mirage.i18n import tr
 from mirage.settings import Settings
-from mirage.ui.widgets import Segmented, Switch, labeled_row
+from mirage.ui.widgets import Disclosure, Segmented, Switch, labeled_row
 
 
 def _label(text: str, size: float = 12.5, object_name: str = "") -> QLabel:
@@ -39,30 +39,46 @@ class LookPanel(QWidget):
 
         self.blend = self._slider(settings.opacity)
         self.blend.valueChanged.connect(lambda v: self.changed.emit("opacity", v / 100))
-        lay.addWidget(labeled_row(_label(tr("blend")), self.blend))
+        blend_row = labeled_row(_label(tr("blend")), self.blend)
+        blend_row.setToolTip(tr("blend_hint"))
+        lay.addWidget(blend_row)
 
         self.sharpness = self._slider(settings.sharpness)
         self.sharpness.valueChanged.connect(lambda v: self.changed.emit("sharpness", v / 100))
-        lay.addWidget(labeled_row(_label(tr("sharpness")), self.sharpness))
+        sharp_row = labeled_row(_label(tr("sharpness")), self.sharpness)
+        sharp_row.setToolTip(tr("sharpness_hint"))
+        lay.addWidget(sharp_row)
 
         self.mouth = self._switch("mouth_mask", settings.mouth_mask)
         mouth_row = labeled_row(_label(tr("keep_mouth")), self.mouth)
         mouth_row.setToolTip(tr("keep_mouth_hint"))
         lay.addWidget(mouth_row)
 
-        self.more_toggle = Switch()
+        self.more_toggle = Disclosure(tr("more_options"))
         self.more_toggle.toggled.connect(self._on_more)
-        lay.addWidget(labeled_row(_label(tr("more_options"), 12.5, "hint"), self.more_toggle))
+        lay.addWidget(self.more_toggle)
 
         self.more = QWidget()
         more = QVBoxLayout(self.more)
         more.setContentsMargins(0, 0, 0, 0)
         more.setSpacing(10)
+        self._rows: dict[str, QWidget] = {}
         for field, key in (("many_faces", "many_faces"), ("color_fix", "color_fix"),
                            ("poisson_blend", "smooth_edges"), ("show_fps", "show_fps")):
-            more.addWidget(labeled_row(_label(tr(key)), self._switch(field, getattr(settings, field))))
+            self._rows[field] = labeled_row(_label(tr(key)), self._switch(field, getattr(settings, field)))
+            more.addWidget(self._rows[field])
         self.more.setVisible(False)
         lay.addWidget(self.more)
+        self._mode = "live"
+
+    def set_context(self, mode: str) -> None:
+        """Photos & videos only use strength, sharpness, mouth and edges: hide what only calls use."""
+        self._mode = mode
+        media = mode == "media"
+        for w in (self.quality, self.quality_hint, self.more_toggle,
+                  self._rows["many_faces"], self._rows["color_fix"], self._rows["show_fps"]):
+            w.setVisible(not media)
+        self.more.setVisible(media or self.more_toggle.isChecked())
 
     def _slider(self, value: float) -> QSlider:
         s = QSlider(Qt.Orientation.Horizontal)
@@ -84,4 +100,4 @@ class LookPanel(QWidget):
         self.changed.emit("quality", value)
 
     def _on_more(self, on: bool) -> None:
-        self.more.setVisible(on)
+        self.more.setVisible(on or self._mode == "media")

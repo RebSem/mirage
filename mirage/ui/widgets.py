@@ -6,6 +6,7 @@ import math
 
 from PySide6.QtCore import (
     Property,
+    QEvent,
     QEasingCurve,
     QPointF,
     QPropertyAnimation,
@@ -15,7 +16,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QFontMetricsF, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QAbstractButton, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from mirage import theme
@@ -41,6 +42,101 @@ class GlassPanel(QWidget):
             p.setBrush(theme.FALLBACK_GLASS)
             p.setPen(QPen(theme.FALLBACK_EDGE, 1))
             p.drawRoundedRect(rect, self.radius, self.radius)
+
+
+class ControlBar(GlassPanel):
+    """The glass bar under the stage: a left group, a right group, and one
+    widget (the primary button) kept in the exact middle of the bar.
+
+    If the middle widget would touch a group, the widgets in ``collapsible``
+    are hidden first (e.g. a text label next to its switch); only if that is
+    not enough does the middle widget slide over, never on top of a group.
+    """
+
+    GAP = 16
+
+    def __init__(self, radius: float, height: int, parent: QWidget | None = None):
+        super().__init__(radius, parent)
+        self.setFixedHeight(height)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(18, 0, 18, 0)
+        row.setSpacing(12)
+        self.left = QHBoxLayout()
+        self.left.setSpacing(12)
+        self.right = QHBoxLayout()
+        self.right.setSpacing(12)
+        row.addLayout(self.left)
+        row.addStretch(1)
+        row.addLayout(self.right)
+        self.center: QWidget | None = None
+        self.collapsible: list[QWidget] = []
+        self._placing = False
+
+    def set_center(self, widget: QWidget) -> None:
+        widget.setParent(self)
+        self.center = widget
+        widget.installEventFilter(self)
+        widget.show()
+
+    def eventFilter(self, obj, event) -> bool:  # noqa: N802
+        if obj is self.center and event.type() in (QEvent.Type.Resize, QEvent.Type.Show):
+            QTimer.singleShot(0, self.place)
+        return False
+
+    def event(self, e) -> bool:
+        if e.type() == QEvent.Type.LayoutRequest:
+            QTimer.singleShot(0, self.place)
+        return super().event(e)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self.place()
+
+    def _group_width(self, layout: QHBoxLayout, with_collapsible: bool) -> int:
+        widths = []
+        for i in range(layout.count()):
+            w = layout.itemAt(i).widget()
+            if w is None:
+                continue
+            if w in self.collapsible:
+                if not (with_collapsible and w.property("wanted") is not False):
+                    continue
+            elif w.isHidden():
+                continue
+            widths.append(min(max(w.sizeHint().width(), w.minimumWidth()), w.maximumWidth()))
+        return sum(widths) + layout.spacing() * max(0, len(widths) - 1)
+
+    def place(self) -> None:
+        """Decide from sizes alone (not from what is visible now), so it never flip-flops."""
+        w = self.center
+        if w is None or self._placing:
+            return
+        self._placing = True
+        try:
+            hint = w.sizeHint()
+            w.resize(max(hint.width(), w.minimumWidth()), max(hint.height(), w.minimumHeight()))
+            margin = self.layout().contentsMargins().left()
+            x = (self.width() - w.width()) // 2
+            right = self._group_width(self.right, True)
+            right_edge = self.width() - margin - right - (self.GAP if right else 0)
+            full_left = margin + self._group_width(self.left, True)
+            fits = x >= full_left + self.GAP and x + w.width() <= right_edge
+            for c in self.collapsible:
+                show = fits and c.property("wanted") is not False
+                if c.isVisibleTo(self) != show:
+                    c.setVisible(show)
+            left = self._group_width(self.left, fits)
+            lo = margin + left + (self.GAP if left else 0)
+            x = max(lo, min(x, right_edge - w.width()))
+            w.move(x, (self.height() - w.height()) // 2)
+            w.raise_()
+        finally:
+            self._placing = False
+
+    def set_wanted(self, widget: QWidget, on: bool) -> None:
+        """Show or hide a collapsible widget by state; the bar may still hide it for room."""
+        widget.setProperty("wanted", on)
+        QTimer.singleShot(0, self.place)
 
 
 # ── icons ────────────────────────────────────────────────────────────────
@@ -189,13 +285,61 @@ def draw_icon(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
         p.setBrush(color)
         p.drawPath(half)
     elif name == "help":
-        p.setPen(QPen(color, max(1.4, s * 0.08)))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawEllipse(c, s * 0.40, s * 0.40)
-        f = theme.font(s * 0.42, theme.QFont.Weight.DemiBold)
-        p.setFont(f)
+        p.setPen(color)
+        p.setFont(theme.font(max(9.0, s * 0.95), theme.QFont.Weight.Bold))
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, "?")
     p.restore()
+
+
+# ── chips: small labels over video and photos (one spec everywhere) ─────
+
+CHIP_H = 26.0
+_CHIP_TONES = {
+    "dark": (QColor(12, 12, 20, 175), QColor(255, 255, 255, 40), theme.TEXT),
+    "quiet": (QColor(12, 12, 20, 150), QColor(255, 255, 255, 28), theme.TEXT_SECONDARY),
+    "light": (QColor(255, 255, 255, 230), None, QColor(18, 18, 26)),
+}
+
+
+def chip_font(strong: bool = False) -> QFont:
+    return theme.font(12, theme.QFont.Weight.DemiBold if strong else theme.QFont.Weight.Medium)
+
+
+def chip_width(text: str, *, dot: bool = False, avatar: bool = False, strong: bool = False) -> float:
+    lead = 3 + 20 + 7 if avatar else (11 + 8 + 7 if dot else 11)
+    return lead + QFontMetricsF(chip_font(strong)).horizontalAdvance(text) + 12
+
+
+def draw_chip(p: QPainter, x: float, y: float, text: str, *, dot: QColor | None = None,
+              avatar: QPixmap | None = None, strong: bool = False, tone: str = "dark") -> QRectF:
+    """A pill with an optional status dot or round avatar; returns its rect."""
+    fill, edge, ink = _CHIP_TONES[tone]
+    rect = QRectF(x, y, chip_width(text, dot=dot is not None, avatar=avatar is not None, strong=strong), CHIP_H)
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(QPen(edge, 1) if edge is not None else Qt.PenStyle.NoPen)
+    p.setBrush(fill)
+    p.drawRoundedRect(rect, CHIP_H / 2, CHIP_H / 2)
+    tx = rect.left() + 11
+    if avatar is not None:
+        circle = QRectF(rect.left() + 3, rect.top() + 3, 20, 20)
+        clip = QPainterPath()
+        clip.addEllipse(circle)
+        p.save()
+        p.setClipPath(clip)
+        p.drawPixmap(circle.toRect(), avatar)
+        p.restore()
+        tx = circle.right() + 7
+    elif dot is not None:
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(dot)
+        p.drawEllipse(QPointF(tx + 4, rect.center().y()), 4, 4)
+        tx += 15
+    p.setFont(chip_font(strong))
+    p.setPen(ink)
+    p.drawText(QRectF(tx, rect.top(), rect.right() - tx, CHIP_H), Qt.AlignmentFlag.AlignVCenter, text)
+    p.restore()
+    return rect
 
 
 # ── pressable base with a subtle scale on press ─────────────────────────
@@ -261,7 +405,8 @@ class PrimaryButton(_Pressable):
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
     def sizeHint(self) -> QSize:  # noqa: N802
-        return QSize(220, 52)
+        text_w = QFontMetricsF(theme.font(15, theme.QFont.Weight.DemiBold)).horizontalAdvance(self.text())
+        return QSize(min(320, max(220, int(text_w) + 18 + 10 + 64)), 52)
 
     def set_mode(self, mode: str, text: str, icon: str | None = None) -> None:
         self.mode = mode
@@ -269,6 +414,8 @@ class PrimaryButton(_Pressable):
         self.setText(text)
         self.setAccessibleName(text)
         self.setEnabled(mode != "busy")
+        self.resize(self.sizeHint())
+        self.updateGeometry()
         if mode == "busy":
             self._spinner.start()
         else:
@@ -288,7 +435,7 @@ class PrimaryButton(_Pressable):
         if self.mode == "stop":
             grad.setColorAt(0, QColor("#FF5E57"))
             grad.setColorAt(1, QColor("#E0245E"))
-        elif self.mode == "busy":
+        elif self.mode in ("busy", "hint"):   # hint: nothing to do yet, the label says what's missing
             grad.setColorAt(0, QColor(255, 255, 255, 60))
             grad.setColorAt(1, QColor(255, 255, 255, 40))
         else:
@@ -297,19 +444,25 @@ class PrimaryButton(_Pressable):
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QBrush(grad))
         p.drawRoundedRect(r, radius, radius)
-        # top sheen: a glassy highlight on the upper half
+        # top sheen: a glassy highlight on the upper half, clipped to the pill
+        pill = QPainterPath()
+        pill.addRoundedRect(r, radius, radius)
         sheen = QLinearGradient(r.topLeft(), QPointF(r.left(), r.center().y()))
         sheen.setColorAt(0, QColor(255, 255, 255, 70 if self._hover else 48))
         sheen.setColorAt(1, QColor(255, 255, 255, 0))
-        p.setBrush(QBrush(sheen))
-        p.drawRoundedRect(r.adjusted(1, 1, -1, -r.height() / 2), radius - 1, radius - 1)
+        p.save()
+        p.setClipPath(pill)
+        p.fillRect(QRectF(r.left(), r.top(), r.width(), r.height() / 2), QBrush(sheen))
+        p.restore()
         p.setPen(QPen(QColor(255, 255, 255, 60), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawRoundedRect(r, radius, radius)
 
         icon = QRectF(0, 0, 18, 18)
         p.setFont(theme.font(15, theme.QFont.Weight.DemiBold))
-        text_w = p.fontMetrics().horizontalAdvance(self.text())
+        # icon 18 + gap 10 + at least 20 on each side; sizeHint leaves 32 a side, so this only bites at 320
+        text = p.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, int(r.width() - 68))
+        text_w = p.fontMetrics().horizontalAdvance(text)
         total = icon.width() + 10 + text_w
         x0 = r.center().x() - total / 2
         icon.moveCenter(QPointF(x0 + icon.width() / 2, r.center().y()))
@@ -320,7 +473,7 @@ class PrimaryButton(_Pressable):
             draw_icon(p, self.icon, icon, QColor("white"))
         p.setPen(QColor("white"))
         p.drawText(QRectF(icon.right() + 10, r.top(), text_w + 4, r.height()),
-                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+                   Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
 
 class IconButton(_Pressable):
@@ -338,12 +491,43 @@ class IconButton(_Pressable):
         self._begin(p)
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         on = self.isCheckable() and self.isChecked()
-        base = 34 if on else (26 if self._hover else 16)
-        p.setPen(QPen(QColor(255, 255, 255, 40), 1))
-        p.setBrush(theme.ACCENT if on else QColor(255, 255, 255, base))
+        edge = QColor(theme.ACCENT_2)
+        edge.setAlpha(170)
+        p.setPen(QPen(edge, 1.2) if on else QPen(QColor(255, 255, 255, 40), 1))
+        p.setBrush(QColor(255, 255, 255, 44 if on else (28 if self._hover else 16)))
         p.drawEllipse(r)
-        draw_icon(p, self.icon, r.adjusted(r.width() * 0.24, r.height() * 0.24, -r.width() * 0.24, -r.height() * 0.24),
-                  QColor(255, 255, 255, 235 if self.isEnabled() else 90))
+        inset = r.width() * (0.30 if self.icon == "help" else 0.24)
+        draw_icon(p, self.icon, r.adjusted(inset, inset, -inset, -inset),
+                  QColor(theme.ACCENT_2) if on else QColor(255, 255, 255, 235 if self.isEnabled() else 90))
+
+
+class Disclosure(_Pressable):
+    """A quiet full-width row, "More ⌄", that shows or hides extra options."""
+
+    def __init__(self, text: str, parent: QWidget | None = None):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setText(text)
+        self.setAccessibleName(text)
+        self.setFixedHeight(30)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(160, 30)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect())
+        color = theme.TEXT if (self._hover or self.isChecked()) else theme.TEXT_SECONDARY
+        p.setFont(theme.font(12.5, theme.QFont.Weight.Medium))
+        p.setPen(color)
+        p.drawText(r.adjusted(0, 0, -24, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self.text())
+        # chevron at the right edge, where the switches are: ⌄ closed, ⌃ open
+        c = QPointF(r.right() - 10, r.center().y())
+        dy = -2.5 if self.isChecked() else 2.5
+        p.setPen(QPen(color, 1.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        p.drawPolyline([QPointF(c.x() - 5, c.y() - dy), QPointF(c.x(), c.y() + dy), QPointF(c.x() + 5, c.y() - dy)])
 
 
 class Switch(QAbstractButton):
@@ -385,6 +569,8 @@ class Switch(QAbstractButton):
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not self.isEnabled():
+            p.setOpacity(0.4)
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         off, on = QColor(255, 255, 255, 46), QColor(theme.ACCENT)
         track = QColor(
@@ -470,7 +656,7 @@ class Segmented(QWidget):
         p.setFont(theme.font(12.5, theme.QFont.Weight.Medium))
         for i, (_v, label) in enumerate(self._options):
             near = max(0.0, 1.0 - abs(self._x - i))
-            p.setPen(QColor(255, 255, 255, int(150 + 105 * near)))
+            p.setPen(QColor(255, 255, 255, int(theme.TEXT_SECONDARY.alpha() + (255 - theme.TEXT_SECONDARY.alpha()) * near)))
             p.drawText(QRectF(r.left() + seg * i, r.top(), seg, r.height()), Qt.AlignmentFlag.AlignCenter, label)
 
 
@@ -485,7 +671,7 @@ class StatusPill(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(33)
         self._timer.timeout.connect(self._tick)
-        self.setFixedHeight(28)
+        self.setFixedHeight(26)
 
     def set_status(self, text: str, color: QColor, pulse: bool = False) -> None:
         self._text = text
@@ -496,7 +682,8 @@ class StatusPill(QWidget):
             self._timer.stop()
             self._pulse = 0.0
         fm = self.fontMetrics()
-        self.setFixedWidth(fm.horizontalAdvance(text) + 44)
+        steady = "".join("8" if ch.isdigit() else ch for ch in text)  # digits don't make it wobble
+        self.setFixedWidth(fm.horizontalAdvance(steady) + 40)
         self.update()
 
     def _tick(self) -> None:
@@ -510,7 +697,7 @@ class StatusPill(QWidget):
         p.setPen(QPen(QColor(255, 255, 255, 34), 1))
         p.setBrush(QColor(255, 255, 255, 20))
         p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
-        c = QPointF(r.left() + 15, r.center().y())
+        c = QPointF(r.left() + 14, r.center().y())
         if self._timer.isActive():
             halo = QColor(self._color)
             halo.setAlpha(int(90 * (0.5 + 0.5 * math.cos(self._pulse * math.pi))))
@@ -522,7 +709,7 @@ class StatusPill(QWidget):
         p.drawEllipse(c, 4, 4)
         p.setPen(theme.TEXT)
         p.setFont(self.font())
-        p.drawText(r.adjusted(26, 0, -10, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._text)
+        p.drawText(r.adjusted(25, 0, -12, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, self._text)
 
 
 def labeled_row(label: QLabel, control: QWidget, parent: QWidget | None = None) -> QWidget:

@@ -10,14 +10,14 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QDesktopServices, QIcon, QImageReader, QPainter, QPainterPath, QPixmap
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QMenu, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QLabel, QMenu, QVBoxLayout, QWidget
 
 from mirage import theme
 from mirage.i18n import tr
 from mirage.media.plan import assigned_count, auto_plan, rank_sources, swap_everyone
 from mirage.media.types import Plan, RenderOptions, SourceInfo, TargetFace
-from mirage.ui.media_view import BatchRow, FaceLabel, MediaView
-from mirage.ui.widgets import GlassPanel, IconButton, PrimaryButton, Switch
+from mirage.ui.media_view import BatchRow, FaceLabel, MediaView, face_letter
+from mirage.ui.widgets import ControlBar, GlassPanel, IconButton, PrimaryButton, Switch
 
 log = logging.getLogger(__name__)
 
@@ -85,6 +85,7 @@ class MediaPage(QWidget):
         self._live_warned = False
         self._enhance_warned = False
         self._job: threading.Thread | None = None
+        self._busy_label = ""                  # what the big button says while a photo job runs
         self._release_when_idle = False
         # The face to wear in this mode. Separate from Live's, so editing
         # photos never changes (or turns off) the face in a running call.
@@ -98,24 +99,20 @@ class MediaPage(QWidget):
         fl.setContentsMargins(0, 0, 0, 0)
         self.view = MediaView()
         self.view.faceClicked.connect(self._on_face_clicked)
-        self.view.backgroundClicked.connect(self.clear_active)
+        self.view.backgroundClicked.connect(self._on_background)
         fl.addWidget(self.view)
         lay.addWidget(self.frame, 1)
 
-        self.bar = GlassPanel(theme.RADIUS_BAR)
-        self.bar.setFixedHeight(theme.CONTROL_BAR_HEIGHT)
-        bl = QHBoxLayout(self.bar)
-        bl.setContentsMargins(18, 0, 18, 0)
-        bl.setSpacing(12)
+        self.bar = ControlBar(theme.RADIUS_BAR, theme.CONTROL_BAR_HEIGHT)
         self.open_btn = IconButton("plus", tr("media_open"), 36)
         self.open_btn.clicked.connect(self.open_dialog)
         self.everyone_btn = IconButton("people", tr("media_swap_everyone"), 36)
         self.everyone_btn.clicked.connect(self.assign_everyone)
         self.enhance = Switch()
+        self.enhance.setToolTip(tr("media_enhance"))
         self.enhance.toggled.connect(self._on_enhance)
         self.enhance_label = QLabel(tr("media_enhance"))
-        self.enhance_label.setObjectName("hint")
-        self.enhance_label.setFont(theme.font(12))
+        self.enhance_label.setFont(theme.font(12.5))
         self.primary = PrimaryButton()
         self.primary.clicked.connect(self._on_primary)
         self.finder_btn = IconButton("folder", tr("media_show_in_finder"), 36)
@@ -123,15 +120,12 @@ class MediaPage(QWidget):
         self.compare_btn = IconButton("compare", tr("media_compare"), 36)
         self.compare_btn.pressed.connect(lambda: self.compare(True))
         self.compare_btn.released.connect(lambda: self.compare(False))
-        bl.addWidget(self.open_btn)
-        bl.addWidget(self.everyone_btn)
-        bl.addWidget(self.enhance)
-        bl.addWidget(self.enhance_label)
-        bl.addStretch(1)
-        bl.addWidget(self.primary)
-        bl.addStretch(1)
-        bl.addWidget(self.finder_btn)
-        bl.addWidget(self.compare_btn)
+        for w in (self.open_btn, self.everyone_btn, self.enhance, self.enhance_label):
+            self.bar.left.addWidget(w)
+        for w in (self.compare_btn, self.finder_btn):
+            self.bar.right.addWidget(w)
+        self.bar.set_center(self.primary)
+        self.bar.collapsible = [self.enhance_label]   # the switch keeps a tooltip when the label goes
         lay.addWidget(self.bar)
 
         self._analyzed.connect(self._on_analyzed)
@@ -244,6 +238,7 @@ class MediaPage(QWidget):
         self._token += 1
         self._cancel = threading.Event()
         self.busy = True
+        self._busy_label = tr("media_analyzing")
         self.result, self.saved_path = None, None
         self.view.active = None
         self.view.badge = ""
@@ -305,11 +300,12 @@ class MediaPage(QWidget):
 
         self._token += 1
         self.kind, self.path = BATCH, None
+        self.result, self.saved_path, self.targets, self.plan = None, None, [], {}
         self.batch_items = [BatchItem(p) for p in paths]
         self.busy = False
         self.view.clear_busy()
         rows = [BatchRow(p.name, "waiting") for p in paths]
-        self.view.show_batch(tr("media_batch_ready", n=len(paths)), rows)
+        self.view.show_batch(tr("media_batch_title", n=len(paths)), rows, self._batch_ready_text())
         self._refresh()
         token = self._token
 
@@ -322,7 +318,7 @@ class MediaPage(QWidget):
                 reader.setAutoTransform(True)
                 size = reader.size()
                 if size.isValid() and size.width() > 0:
-                    scale = 72 / max(1, min(size.width(), size.height()))
+                    scale = 112 / max(1, min(size.width(), size.height()))  # sharp at 2x
                     reader.setScaledSize(QSize(max(1, int(size.width() * scale)), max(1, int(size.height() * scale))))
                 image: QImage = reader.read()
                 if not image.isNull():
@@ -330,6 +326,10 @@ class MediaPage(QWidget):
             self._thumbs.emit((token, thumbs))
 
         threading.Thread(target=load_thumbs, name="mirage-thumbs", daemon=True).start()
+
+    def _batch_ready_text(self) -> str:
+        entry = self.library.get(self.selected_id) if self.selected_id else None
+        return tr("media_batch_ready", name=entry.name) if entry else tr("media_batch_ready_pick")
 
     def _on_thumbs(self, payload) -> None:
         token, thumbs = payload
@@ -379,7 +379,7 @@ class MediaPage(QWidget):
             if entry is not None:
                 labels[t.index] = FaceLabel(entry.name, _round_pixmap(self.library.thumb_path(entry.id), 40), True)
             else:
-                labels[t.index] = FaceLabel(tr("media_keep"), None, False)
+                labels[t.index] = FaceLabel(tr("media_choose_face"), None, False)
         self.view.set_faces(self.targets, labels)
 
     def _plan_changed(self) -> None:
@@ -411,6 +411,18 @@ class MediaPage(QWidget):
         self.plan = swap_everyone(self.targets, self.selected_id)
         self._plan_changed()
 
+    def _on_background(self) -> None:
+        if self.kind == EMPTY and not self.busy:
+            self.open_dialog()   # the whole empty drop zone opens files
+        else:
+            self.clear_active()
+
+    def look_changed(self) -> None:
+        """Blend, sharpness, mouth or edges changed: the photo on screen no longer matches."""
+        if not self.busy and self.kind == PHOTO and self.result is not None:
+            self._invalidate_output()
+            self._refresh()
+
     def clear_active(self) -> None:
         self.view.active = None
         self.view.update()
@@ -422,6 +434,11 @@ class MediaPage(QWidget):
             self.assign(self.view.active, face_id)
             return True
         self.selected_id = face_id
+        if self.kind == BATCH and not self.busy:
+            if all(i.status == "waiting" for i in self.batch_items):
+                self.view.batch_subtitle = self._batch_ready_text()
+                self.view.update()
+            self._refresh()   # the big button may go from "Pick a face" to "Swap in N photos"
         if self.busy or self.kind not in (PHOTO, VIDEO) or not self.targets:
             return False
         if face_id is None:
@@ -441,6 +458,18 @@ class MediaPage(QWidget):
             self.plan = {i: (None if v == face_id else v) for i, v in self.plan.items()}
             if not self.busy:
                 self._plan_changed()
+        self.on_library_changed()
+
+    def on_library_changed(self) -> None:
+        """A face was renamed or removed: refresh names shown on the stage and the button."""
+        if self.busy:
+            return
+        if self.kind == BATCH and all(i.status == "waiting" for i in self.batch_items):
+            self.view.batch_subtitle = self._batch_ready_text()
+            self.view.update()
+        elif self.kind in (PHOTO, VIDEO) and self.targets:
+            self._relabel()
+        self._refresh()
 
     def _on_face_clicked(self, index: int, pos: QPointF) -> None:
         target = next((t for t in self.targets if t.index == index), None)
@@ -449,7 +478,7 @@ class MediaPage(QWidget):
         self.view.active = index
         self.view.update()
         menu = QMenu(self)
-        desc = tr("media_face_n", n=index)
+        desc = tr("media_face_n", n=face_letter(index))
         if target.gender is not None and target.age is not None:
             desc += " · " + tr("media_face_desc", gender=tr("gender_m" if target.gender == 1 else "gender_f"),
                                 age=int(round(target.age)))
@@ -479,6 +508,13 @@ class MediaPage(QWidget):
     # ── actions ──────────────────────────────────────────────────────────
 
     def _on_primary(self) -> None:
+        if self.kind in (PHOTO, VIDEO) and not self.busy:
+            if not self.targets:
+                self.open_dialog()
+                return
+            if not assigned_count(self.plan) and not (self.kind == VIDEO and self.saved_path):
+                self._toast(tr("media_pick_face"), "info")
+                return
         if self.kind == PHOTO:
             if self.busy:
                 return
@@ -528,6 +564,7 @@ class MediaPage(QWidget):
         self._warn_if_live()
         token = self._token
         self.busy = True
+        self._busy_label = tr("media_rendering")
         enhance = self.settings.photo_enhance
         self.view.set_busy(tr("media_downloading_enhancer") if enhance and not _gfpgan_present()
                            else tr("media_rendering"))
@@ -572,6 +609,7 @@ class MediaPage(QWidget):
 
         token = self._token
         self.busy = True
+        self._busy_label = tr("media_saving")
         self._refresh()
         result, path, meta = self.result, self.path, self.meta
 
@@ -593,7 +631,7 @@ class MediaPage(QWidget):
             self._toast(tr("media_failed", name=self.path.name if self.path else "", error=error), "error")
         else:
             self.saved_path = out
-            self._toast(tr("media_saved", name=Path(out).name))
+            self._toast(tr("media_saved", name=Path(out).name), "success")
         self._refresh()
 
     def reveal(self) -> None:
@@ -625,8 +663,10 @@ class MediaPage(QWidget):
         token = self._token
         self._cancel = threading.Event()
         self.busy = True
-        self.view.show_batch(tr("media_batch_progress", done=len(self.batch_items) - len(pending),
-                                total=len(self.batch_items)), rows)
+        done = len(self.batch_items) - len(pending)
+        self.view.show_batch(tr("media_batch_title", n=len(self.batch_items)), rows,
+                             tr("media_batch_progress", done=done, total=len(self.batch_items)),
+                             done / max(1, len(self.batch_items)))
         me, selected_is_me = self._me_embedding(), self._selected_is_me()
         embeddings = self._embeddings([selected])
         options = RenderOptions(enhance=self.settings.photo_enhance)
@@ -654,7 +694,8 @@ class MediaPage(QWidget):
         self.view.rows[i].status = status
         self.view.rows[i].detail = str(error)[:80] if error else ""
         done = sum(1 for r in self.view.rows if r.status not in ("waiting", "working"))
-        self.view.batch_title = tr("media_batch_progress", done=done, total=len(self.view.rows))
+        self.view.batch_subtitle = tr("media_batch_progress", done=done, total=len(self.view.rows))
+        self.view.batch_progress = done / max(1, len(self.view.rows))
         self.view.update()
 
     def _on_batch_done(self, payload) -> None:
@@ -663,12 +704,22 @@ class MediaPage(QWidget):
             return
         self._job_finished()
         count = {s: sum(1 for i in items if i.status == s) for s in ("saved", "skipped", "no_face", "failed", "waiting")}
+        self.view.batch_progress = None
+        parts = [tr("media_batch_saved", saved=count["saved"], total=len(items))]
+        if count["skipped"] + count["no_face"]:
+            parts.append(tr("media_batch_no_face", n=count["skipped"] + count["no_face"]))
+        if count["failed"]:
+            parts.append(tr("media_batch_failed", n=count["failed"]))
+        summary = " · ".join(parts)
         if count["waiting"]:
-            self.view.batch_title = tr("media_batch_stopped", saved=count["saved"], left=count["waiting"])
+            self.view.batch_subtitle = tr("media_batch_stopped", left=count["waiting"])
+        elif count["saved"] == len(items):
+            self.view.batch_subtitle = tr("media_batch_finished")
         else:
-            self.view.batch_title = tr("media_batch_done", saved=count["saved"],
-                                       skipped=count["skipped"] + count["no_face"], failed=count["failed"])
-        self._toast(self.view.batch_title, "warn" if count["failed"] else "info")
+            self.view.batch_subtitle = summary   # e.g. "Saved 0 of 3 · 3 without a face"
+        # The list already shows the result; a toast only if it needs attention or can't be seen.
+        if count["failed"] or not self.isVisible():
+            self._toast(summary, "warn" if count["failed"] else "info")
         self.view.update()
         self._refresh()
 
@@ -735,7 +786,7 @@ class MediaPage(QWidget):
                 self._toast(tr("media_failed", name=self.path.name if self.path else "", error=error), "error")
         else:
             self.saved_path = Path(out)
-            self._toast(tr("media_video_done", name=self.saved_path.name))
+            self._toast(tr("media_video_done", name=self.saved_path.name), "success")
         self._refresh()
 
     # ── chrome ───────────────────────────────────────────────────────────
@@ -746,26 +797,43 @@ class MediaPage(QWidget):
         self._refresh()
 
     def _refresh(self) -> None:
-        """Buttons follow the state: one obvious next step."""
+        """Buttons follow the state: one obvious next step, never one that can't be done yet."""
         kind, busy = self.kind, self.busy
         has_faces = bool(self.targets) and kind in (PHOTO, VIDEO)
-        self.everyone_btn.setVisible(has_faces and not busy)
-        self.compare_btn.setVisible(kind == PHOTO and self.result is not None)
-        self.finder_btn.setVisible(bool(self.saved_path) or (kind == BATCH and any(i.output for i in self.batch_items)))
+        planned = bool(assigned_count(self.plan)) if has_faces else False
+        self.open_btn.setVisible(kind != EMPTY)   # when empty, the big button already opens files
+        self.open_btn.setEnabled(not busy)
+        self.everyone_btn.setVisible(len(self.targets) > 1 and kind in (PHOTO, VIDEO) and not busy)
+        entry = self.library.get(self.selected_id) if self.selected_id else None
+        self.everyone_btn.setToolTip(tr("media_swap_everyone_named", name=entry.name) if entry
+                                     else tr("media_swap_everyone"))
+        self.compare_btn.setVisible(kind == PHOTO and self.result is not None and not busy)
+        # "Show in Finder" as its own button only where the big button says something else.
+        waiting = kind == BATCH and any(i.status == "waiting" for i in self.batch_items)
+        self.finder_btn.setVisible(not busy and (
+            (kind == VIDEO and self.saved_path is not None)
+            or (waiting and any(i.output for i in self.batch_items))))
         show_enhance = kind in (PHOTO, BATCH, VIDEO)
         self.enhance.setVisible(show_enhance)
-        self.enhance_label.setVisible(show_enhance)
+        self.enhance.setEnabled(not busy)      # a running job keeps the setting it started with
+        self.enhance_label.setEnabled(not busy)
+        self.bar.set_wanted(self.enhance_label, show_enhance)
         if show_enhance:
             self.enhance.blockSignals(True)
             self.enhance.setChecked(bool(getattr(self.settings, self._enhance_field())))
             self.enhance.blockSignals(False)
-            self.enhance_label.setText(tr("media_enhance_video" if kind == VIDEO else "media_enhance"))
-        self.open_btn.setEnabled(not busy)
+            self.enhance_label.setText(tr("media_enhance"))
+            self.enhance.setToolTip(tr("media_enhance_video" if kind == VIDEO else "media_enhance"))
+            self.enhance_label.setToolTip(self.enhance.toolTip())
         if kind == EMPTY:
             self.primary.set_mode("start", tr("media_open"), icon="plus")
+        elif kind in (PHOTO, VIDEO) and not busy and not self.targets:
+            self.primary.set_mode("start", tr("media_open_other"), icon="plus")
         elif kind == PHOTO:
             if busy:
-                self.primary.set_mode("busy", tr("media_working"))
+                self.primary.set_mode("busy", self._busy_label or tr("media_working"))
+            elif not planned:
+                self.primary.set_mode("hint", tr("media_pick_face_short"), icon="person")
             elif self.result is None:
                 self.primary.set_mode("start", tr("media_swap"), icon="swap")
             elif self.saved_path is None:
@@ -773,26 +841,34 @@ class MediaPage(QWidget):
             else:
                 self.primary.set_mode("start", tr("media_show_in_finder"), icon="folder")
         elif kind == BATCH:
-            waiting = sum(1 for i in self.batch_items if i.status == "waiting")
+            waiting_n = sum(1 for i in self.batch_items if i.status == "waiting")
             if busy:
                 self.primary.set_mode("stop", tr("media_cancel"))
-            elif waiting == len(self.batch_items):
-                self.primary.set_mode("start", tr("media_process_all", n=waiting), icon="swap")
-            elif waiting:
-                self.primary.set_mode("start", tr("media_continue", n=waiting), icon="swap")
+            elif waiting_n and not self.selected_id:
+                self.primary.set_mode("hint", tr("media_pick_face_short"), icon="person")
+            elif waiting_n == len(self.batch_items):
+                self.primary.set_mode("start", tr("media_process_all", n=waiting_n), icon="swap")
+            elif waiting_n:
+                self.primary.set_mode("start", tr("media_continue", n=waiting_n), icon="swap")
             elif any(i.output for i in self.batch_items):
                 self.primary.set_mode("start", tr("media_show_in_finder"), icon="folder")
             else:
-                self.primary.set_mode("start", tr("media_open"), icon="plus")
+                self.primary.set_mode("start", tr("media_open_other"), icon="plus")
         elif kind == VIDEO:
             if busy and self.video_info is None:
-                self.primary.set_mode("busy", tr("media_working"))
+                self.primary.set_mode("busy", tr("media_analyzing"))
             elif busy:
                 self.primary.set_mode("stop", tr("media_cancel"))
-            elif self.saved_path is None:
-                self.primary.set_mode("start", tr("media_render_video"), icon="film")
+            elif self.saved_path is not None:
+                self.primary.set_mode("start", tr("media_open_video"), icon="play")
+            elif not planned:
+                self.primary.set_mode("hint", tr("media_pick_face_short"), icon="person")
             else:
-                self.primary.set_mode("start", tr("media_open_video"), icon="film")
+                self.primary.set_mode("start", tr("media_render_video"), icon="film")
+        # A running job reads Look on every frame; don't let a slider change half a video.
+        look = getattr(self.win, "look", None)
+        if look is not None and self.win.pages.currentWidget() is self:
+            look.setEnabled(not busy)
 
     def _job_finished(self) -> None:
         self.busy = False
