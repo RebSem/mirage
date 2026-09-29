@@ -13,6 +13,7 @@ uses. For a short how-to, see the
 - [Opening files](#opening-files)
 - [Finding faces](#finding-faces)
 - [Who becomes whom](#who-becomes-whom)
+- [On screen](#on-screen)
 - [Rendering a photo](#rendering-a-photo)
 - [Loading and saving photos](#loading-and-saving-photos)
 - [Batch](#batch)
@@ -24,13 +25,21 @@ uses. For a short how-to, see the
 ## Opening files
 
 The mode is a second page in the main window, picked with the
-**Live | Photos & videos** switch in the title bar and remembered between
-launches (`Settings.mode`). The face gallery and the *Look* settings in the
-sidebar are shared with Live, and a live session keeps running while you work
-on files.
+**Live | Photos & videos** switch in the middle of the title bar and
+remembered between launches (`Settings.mode`). The face gallery and the
+*Look* settings in the sidebar are shared with Live, and a live session keeps
+running while you work on files. The title bar shows the call's status and
+the virtual camera hint here only while a call is running in the background.
 
-Files come in through **Open…** (`⌘⇧O`, *File → Open Photos or Video…*) or a
-drop:
+The *Look* section shows only the settings that change a file: *Strength*,
+*Sharpness*, *Keep my mouth* and *Smooth edges*. The quality presets,
+*Swap everyone in view*, *Fix blue tint* and *Show fps* only affect calls, so
+they are hidden in this mode. Changing one of the four after a swap turns the
+big button back into **Swap** (see [Changing the plan](#changing-the-plan)).
+
+Files come in through **Open…** (the big button while nothing is open, the
+`+` button once something is, `⌘⇧O`, *File → Open Photos or Video…*, or a
+click anywhere in the empty drop zone) or a drop:
 
 - Dropped on the **sidebar**: photos are added to the face gallery, as before.
 - Dropped anywhere else in **Photos & videos**: opened in this mode.
@@ -70,13 +79,15 @@ embedding, gender and age.
   a second pass runs at 1280×1280. Both passes are merged with non-maximum
   suppression: highest score first, boxes overlapping a kept one by IoU ≥ 0.4
   are dropped.
-- **Identity:** the upstream recognition model (ArcFace from `buffalo_l`)
+- **Identity:** InsightFace's recognition model (ArcFace from `buffalo_l`)
   gives each face its embedding.
 - **Gender and age:** `genderage.onnx` from `buffalo_l`, on the CPU. If it
   fails, both are left unknown; nothing else depends on them.
-- **Numbering:** faces are numbered 1, 2, 3… from left to right by the centre
-  of their box (top to bottom on a tie), so the numbers on screen are stable
-  and easy to talk about.
+- **Order:** faces are numbered 1, 2, 3… from left to right by the centre
+  of their box (top to bottom on a tie). On screen the same order is shown
+  as letters, A, B, C… (`face_letter()` in `media_view.py`), so they never
+  look like the gallery's `1`–`9` shortcuts; either way they are stable and
+  easy to talk about.
 
 The shared CPU detector is not re-entrant, so detection calls are serialised
 with a lock.
@@ -93,11 +104,14 @@ A *plan* maps each face number to a library face id, or to nothing
 
 ### The automatic plan
 
-`auto_plan()` gives the face selected in the gallery (`Settings.face_id`) to
-exactly one person:
+`auto_plan()` gives the face selected in the gallery to exactly one person.
+Photos & videos keeps its own selection (`MediaPage.selected_id`, which starts
+as Live's `Settings.face_id`), so choosing faces here never changes the face
+you wear in a running call.
 
-1. **Nothing selected** (the *Me* tile): nobody is swapped, and a toast asks
-   you to pick a face in the gallery first.
+1. **Nothing selected** (the *Me* tile): nobody is swapped; a toast asks you
+   to pick a face in the gallery first, and the big button says *Pick a face
+   on the right*.
 2. **Find me.** If a library face is marked *This is me*
    (`Settings.me_face_id`), the face in the picture with the highest cosine
    similarity to it is chosen, provided the similarity is at least **0.40**
@@ -113,20 +127,24 @@ exactly one person:
 
 ### Changing the plan
 
-- **Click a face** in the picture: a menu shows *Face N · man, about 34*
-  (when gender and age are known), then **Leave as is**, then every library
-  face, ranked (see below). The current choice is ticked.
-- **Give everyone the selected face** (the people button): every face gets
-  the selected library face (`swap_everyone()`).
+- **Click a face** in the picture (hovering one shows a *Choose a face…*
+  chip): a menu shows *Face B · man, about 34* (when gender and age are
+  known), then **Leave as is**, then every library face, ranked (see below).
+  The current choice is ticked.
+- **Give everyone the selected face** (the people button, shown when there
+  are two or more faces; its tooltip names the face, *Give everyone Anna’s
+  face*): every face gets the selected library face (`swap_everyone()`).
 - **A gallery click or `1`–`9`** while a face in the picture is highlighted
   changes only that face. Otherwise it changes the selected face: if anyone
   is being swapped, all of them get the new face; if nobody is, the automatic
   plan is made again with it. **`0`** (*Me*) leaves the highlighted face as
   is, or, with nothing highlighted, clears the plan. **`Esc`** removes the
-  highlight. The gallery selection is shared with Live, so selecting a face
-  here also changes it on a call that is running.
+  highlight.
 - Any change after **Swap** throws the rendered result away; the stage shows
-  the original again and the button goes back to **Swap**.
+  the original again and the button goes back to **Swap**. That includes
+  **Enhance faces** and the four *Look* settings (*Strength*, *Sharpness*,
+  *Keep my mouth*, *Smooth edges*), because the result on screen was made
+  with the old values.
 
 ### Suggestions
 
@@ -156,6 +174,54 @@ list; they never change the plan by themselves.
   `FaceLibrary.set_attributes()`. Each face is tried at most once per session,
   so only the first file you open after upgrading takes a moment longer.
 
+## On screen
+
+`MediaView` draws the picture fitted into the stage, with rounded corners,
+and marks the plan on it:
+
+- **Every face** has its letter in a small round badge on the top-left
+  corner of its box.
+- **Will be swapped:** a solid outline with a violet-to-blue gradient, the
+  badge filled violet, and a chip with the new face's avatar and name.
+- **Left as is:** four corner marks and a dark badge, no chip. Hovering
+  brightens the marks and shows a quiet *Choose a face…* chip. The face you
+  clicked glows while its menu is open, and stays highlighted if you close
+  the menu without choosing.
+- **Chips** stay inside the photo and never cover each other: each one goes
+  under its face if there is room, otherwise inside the bottom of the
+  outline or above the face.
+- **After a swap** a chip labels the photo, above it when there is room and
+  on its top-left corner otherwise: *Swapped · hold Space to compare*. While
+  you hold the compare button or `Space` it says *Original* and the marks are
+  hidden, so you see the original clean.
+- **While Mirage works**, the marks are hidden, the photo dims and a small
+  capsule with a spinner in its middle says what is happening (*Finding
+  faces…*, *Swapping faces…*, or *Downloading face enhancement (about 370 MB,
+  first time only)…*); for a video it adds a progress bar (see
+  [Videos](#videos)).
+- **Nothing open:** the whole dashed drop zone is clickable and opens files,
+  with the hint *Pick who to become on the right · ⌘⇧O opens files*.
+
+The big button in the control bar always shows the next step and never
+offers something that can't be done:
+
+| State | The big button reads |
+|---|---|
+| nothing open | **Open…** |
+| a photo | *Finding faces…* → **Swap** → *Swapping faces…* → **Save** → *Saving…* → **Show in Finder** |
+| several photos or a folder | **Swap in N photos** → **Cancel** (while it runs) → **Show in Finder** (**Continue · N left** after a cancel, **Open another…** if nothing was saved) |
+| a video | *Finding faces…* → **Make video** → **Cancel** (while it runs) → **Play video** |
+| no faces found | **Open another…** |
+| faces found, but nobody to swap (for example with *Me* selected) | *Pick a face on the right*, muted; clicking it explains in a toast |
+
+*Finding faces…*, *Swapping faces…* and *Saving…* show a spinner and can't
+be clicked. The other buttons in the bar follow the same rule: `+` (open) is
+there only once something is open, the people button only with two or more
+faces, compare only after a photo swap, and the folder button
+(**Show in Finder**) only where the big button says something else: after a
+video (**Play video**) or after a cancelled batch that saved some photos
+(**Continue · N left**).
+
 ## Rendering a photo
 
 `render.PhotoRenderer.render()` works on the full-resolution photo; nothing is
@@ -168,7 +234,7 @@ scaled down.
    faces are close together and one is already swapped.
 3. `face_swapper.swap_face()` swaps it: inswapper_128 on the Neural Engine,
    pasted back into the full-size photo. The *Look* settings apply as in
-   Live: *Blend*, *Keep my mouth*, *Smooth edges* and, afterwards,
+   Live: *Strength*, *Keep my mouth*, *Smooth edges* and, afterwards,
    *Sharpness* on the swapped boxes.
 4. With **Enhance faces** on (`Settings.photo_enhance`, the default), GFPGAN
    (`gfpgan-1024.onnx`, on a 512 px aligned face) restores the detail that a
@@ -182,8 +248,9 @@ about 370 MB, plus a CoreML-optimised copy next to it), kept for the next
 photos, and released when you switch back to **Live** unless a job is still
 running.
 
-After the swap the stage shows the result with a *Swapped* chip. Holding the
-compare button or `Space` shows the original (the chip says *Original*).
+After the swap the stage shows the result with a
+*Swapped · hold Space to compare* chip. Holding the compare button or `Space`
+shows the original (the chip says *Original*).
 
 ## Loading and saving photos
 
@@ -225,10 +292,12 @@ After saving, the button turns into **Show in Finder**.
 
 ## Batch
 
-Several photos or a folder open as a list: thumbnails (for the first 200
-files), names and a status for each, and the title
-*N photos ready — the main face in each becomes the selected face*. The
-button reads **Swap in N photos**.
+Several photos or a folder open as a list under the header *N photos*, with
+a subtitle that says who everyone becomes (*The main face in each becomes
+Anna*, or *Pick a face on the right first* while *Me* is selected). Each row
+has a centre-cropped thumbnail (for the first 300 files), the file name and a
+status pill. The button reads **Swap in N photos**, or *Pick a face on the
+right* until a face is selected.
 
 `batch.run_batch()` then processes the files in order on one worker thread:
 load → find faces → automatic plan (*This is me* first, then the main face,
@@ -244,11 +313,20 @@ next to the original. *Enhance faces* applies as for single photos.
 | Skipped | faces were found but the plan swaps nobody |
 | Failed | an error; it is logged and the batch goes on |
 
+While it runs, the subtitle counts (*Swapping faces… 2 of 3*), a progress
+bar fills, count pills in the header add up *Saved*, *No face* (with
+*Skipped*) and *Failed*, and the list keeps the photo being worked on in
+view. When a photo fails, the error is shown under its name.
+
 **Cancel** is checked between files: the current photo finishes (and is
-saved), the rest stay *Waiting*. At the end a toast sums it up (*Done: 12
-saved, 1 without a face to swap, 0 failed*; *No face* and *Skipped* count
-together), and the button turns into **Show in Finder**, which selects the
-first result. The Mac is kept awake while a batch runs.
+saved), the rest stay *Waiting*. The subtitle then says *Stopped · N left*,
+the button offers **Continue · N left**, and the folder button shows what
+was saved so far. A finished batch says *Done · saved next to the
+originals*, and the button turns into **Show in Finder**, which selects the
+first result. The list already shows the result, so there is no toast
+unless something failed or the window isn't showing the list (you switched
+to Live, say): *Saved 12 of 13 · 1 without a face*. The Mac is kept awake
+while a batch runs.
 
 ## Videos
 
@@ -287,9 +365,10 @@ FrameReader ─► detect + track ─► swap ──────────► 
 - **Swap** (the render's own worker thread): inswapper on the **Neural
   Engine** for every face that was matched to a chosen person, with the same
   *Look* settings as photos (*Sharpness* is applied per face, without Live's
-  frame-to-frame blending). With **Enhance faces (slower)** on
-  (`Settings.video_enhance`, off by default), GPEN-BFR-256 then restores each
-  swapped face. The swap is the slowest step and sets the pace.
+  frame-to-frame blending). With **Enhance faces** on (for a video its
+  tooltip reads *Enhance faces (slower)*; `Settings.video_enhance`, off by
+  default), GPEN-BFR-256 then restores each swapped face. The swap is the
+  slowest step and sets the pace.
 - **Writer** (`mirage-video-write`): ffmpeg encodes.
 
 Between stages sit queues of 2 to 4 frames (fewer for big frames, about
@@ -351,12 +430,15 @@ face's embedding. In every frame the `IdentityTracker` decides who is who:
   **Cancel** or any error kills ffmpeg and deletes those files, so a partial
   video is never left behind.
 
-While it runs, the stage shows a progress bar and *Frame 120 of 900 · 13 fps ·
-1:00 left*, updated about four times a second; the speed is measured over the
+While it runs, the frame dims and the capsule on it says *Making the
+video…*, with a progress bar and *Frame 120 of 900 · 13 fps · 1:00 left*
+under it, updated about four times a second; the speed is measured over the
 last 3 seconds, and the time left is the remaining frames divided by that
-speed. When the video is done, the button turns into **Open video** (it opens
-in your default player) and **Show in Finder** appears next to it. The Mac is
-kept awake while a video renders.
+speed. The big button is a red **Cancel** meanwhile. When the video is done,
+a toast says *Video saved next to the original: “name-mirage.mp4”*, the big
+button turns into **Play video** (it opens in your default player) and a
+folder button next to it shows the file in Finder. The Mac is kept awake
+while a video renders.
 
 ## Speed on a MacBook Air M1
 
@@ -398,7 +480,7 @@ bottleneck; decoding, detection and encoding run alongside it.
 | `mirage/media/batch.py` | `run_batch()`: the automatic plan over many photos, with statuses and cancel |
 | `mirage/media/video.py` | ffmpeg lookup, probing, sample frames, `FrameReader` / `FrameWriter`, `IdentityTracker`, `render_video()` |
 | `mirage/ui/media_page.py` | `MediaPage`: the mode's state, worker threads, the control bar and its one primary button |
-| `mirage/ui/media_view.py` | `MediaView`: the stage (picture, numbered outlines, chips, batch list, progress) |
+| `mirage/ui/media_view.py` | `MediaView`: the stage (picture, lettered faces with outlines or corner marks, chips, busy capsule, batch list) |
 | `mirage/ui/main_window.py` | the mode switch, drops, shortcuts, *This is me* in the face menu |
 
 Tests: `tests/mirage/test_media_plan.py`, `test_media_batch.py` (with

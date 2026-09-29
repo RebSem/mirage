@@ -106,8 +106,8 @@ you get less:
 
 - Choose the **Fast** preset. **Best** adds face enhancement, which is the
   most expensive step; keep it off unless you really need it.
-- Turn off *Swap everyone in view* (under **More**) unless you need it; every
-  extra face in the picture costs another swap.
+- Turn off *Swap everyone in view* (under **More options**) unless you need
+  it; every extra face in the picture costs another swap.
 - Plug in the charger and turn off Low Power Mode.
 - Close heavy apps: browsers with many tabs, other video apps, games,
   anything exporting video.
@@ -115,7 +115,8 @@ you get less:
   keep it on a hard surface, not a blanket or your lap.
 - Don't make a video or run a batch in **Photos & videos** during a call:
   both use the Neural Engine, so the call gets fewer fps while they run.
-- Turn on *Show FPS* (under **More**) to see the effect of each change.
+- Turn on *Show fps* (under **More options**) to see the effect of each
+  change.
 
 ## “No face found” in a photo
 
@@ -241,7 +242,8 @@ with two people at about 10. To go faster:
   left adjusts as it goes.
 - Stop **Live**. A call and a render share the Neural Engine, so both get
   slower.
-- Leave **Enhance faces (slower)** off for videos.
+- Leave **Enhance faces** off for videos: there it restores every swapped
+  face in every frame, which is much slower.
 - Close other heavy apps.
 
 The Mac stays awake while a video renders, so you can leave it running, and

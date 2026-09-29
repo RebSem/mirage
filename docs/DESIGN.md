@@ -16,115 +16,238 @@ there at the cost of clarity or frame rate.
 Roughly (the widgets in `mirage/ui/` are the source of truth):
 
 ```
- ● ● ●  Mirage  ● Ready  [Live|Photos & videos]  Zoom camera: “OBS…”  (?)
+ ● ● ● Mirage  ● Ready [Live|Photos & videos]  Zoom camera: “OBS…” (?)
 ┌──────────────────────────────────────────────┐ ┌─────────────────┐
 │                                              │ │  Faces          │
 │                                              │ │  ◯ Me   ◯ 1     │
 │                 stage                        │ │  ◯ 2    ◯ 3     │
 │             (live preview)                   │ │  + Add  Random  │
-│                                              │ │                 │
+│                                              │ │  ─────────────  │
 │                                              │ │  Look           │
 └──────────────────────────────────────────────┘ │  Fast|Bal|Best  │
-┌──────────────────────────────────────────────┐ │  blend, sharp…  │
-│  camera ▾          [   Start   ]      mirror │ │                 │
+┌──────────────────────────────────────────────┐ │  Strength ──●   │
+│ (cam) camera ⌄  [ ▶ Start ]           mirror │ │  More options ⌄ │
 └──────────────────────────────────────────────┘ └─────────────────┘
       glass control bar                              glass sidebar
 ```
 
-- **Top bar** (next to the traffic lights, no glass): the app name, the
-  status pill, the mode switch (**Live | Photos & videos**, a segmented
-  control with a sliding highlight), the virtual camera hint and a help
-  button that opens the matching troubleshooting section.
+- **Top bar** (next to the traffic lights, no glass): the app name and the
+  status pill on the left; the mode switch (**Live | Photos & videos**, a
+  248×28 pt segmented control with a sliding highlight) in the middle of the
+  window; the virtual camera hint and a help button that opens the matching
+  troubleshooting section on the right. The switch is centred on the window,
+  not on the space that is left, so it stays put when the status text
+  changes; on a narrow window it moves only as far as it must to keep 16 pt
+  clear of its neighbours. The status pill and the hint are about calls: in
+  Photos & videos they show only while a call is running in the background,
+  and the help button only in Live.
 - **Stage** (left, glass): the live preview. When idle it explains what to do
-  next; while you drag photos over the window it shows where to drop them.
-- **Sidebar** (right, glass): the face library on top, the *Look* settings
-  below it.
-- **Control bar** (under the stage, glass): the camera menu, the one big
-  **Start / Stop** button and the mirror toggle.
+  next (*Press Start to go live as Anna* once a face is picked, *Pick a face,
+  then press Start* before); while you drag photos over the window it shows
+  where to drop them.
+- **Sidebar** (right, glass): the face library on top and the *Look* settings
+  right under it. The face grid is only as tall as its faces (it scrolls only
+  when the window is too short) and the spare room collects at the bottom,
+  so opening *More options* grows the panel downwards and nothing above it
+  moves. Each face tile carries its `1`–`9` shortcut in a small badge, white
+  on the selected face.
+- **Control bar** (under the stage, glass): the camera menu (with its own
+  chevron) on the left, the one big **Start / Stop** button in the middle,
+  the mirror toggle on the right.
 
 ## Photos & videos
 
 The same window with a second page. The mode switch in the title bar swaps
 the stage and the control bar for the Photos & videos ones; the sidebar stays
-put, because the faces you pick are the faces you wear in both modes. The
-switch remembers its position between launches, and a live call keeps going
-in the background.
+put, because your faces and the *Look* settings are the same in both modes
+(each mode keeps its own selected face, though). *Look* shows only what
+changes a file there: *Strength*, *Sharpness*, *Keep my mouth* and
+*Smooth edges*. The switch remembers its position between launches, and a
+live call keeps going in the background.
 
 ```
-┌──────────────────────────────────────────────┐
-│ Swapped                                      │
-│                                              │
-│     1┌╌╌╌╌╌╌╌┐           2┏━━━━━━━┓          │
-│      ╎       ╎            ┃       ┃          │
-│      ╎       ╎            ┃       ┃          │
-│      └╌╌╌╌╌╌╌┘            ┗━━━━━━━┛          │
-│      Leave as is          (◉) Anna           │
-│                                              │
-└──────────────────────────────────────────────┘
-┌──────────────────────────────────────────────┐
-│ +  everyone  ◯ enhance  [  Save  ]  finder ◐ │
-└──────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│  ● Swapped · hold Space to compare                               │
+│ ╭──────────────────────────────────────────────────────────────╮ │
+│ │    A┌─      ─┐                  B┏━━━━━━━━━━┓                │ │
+│ │                                  ┃          ┃                │ │
+│ │     └─      ─┘                   ┗━━━━━━━━━━┛                │ │
+│ │                                   (◉) Anna                   │ │
+│ ╰──────────────────────────────────────────────────────────────╯ │
+└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│ +  people  ◯ Enhance faces  [ Save ]                           ◐ │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-**The stage** shows the picture fitted into the glass frame, with every face
-marked:
+**The stage** shows the picture fitted into the glass frame, with 12 pt
+rounded corners and a hairline edge, and every face marked:
 
-- a rounded outline around each face, with its number (1, 2, 3… from left to
-  right) in a small badge at the top-left corner;
-- **solid, in the accent colour** (badge filled too): this face will be
-  swapped; **dashed, white**: it is left as is. Hovering brightens an outline
-  and shows a pointing hand; the face you clicked glows while its menu is
-  open;
-- under each face, a chip with the avatar and name of the face it becomes,
-  or *Leave as is* without an avatar;
-- a chip at the top left: *Swapped* after a swap, *Original* while you
-  compare.
+- a letter (A, B, C… from left to right) in a 22 pt round badge on the
+  top-left corner of the face, always inside the photo. Letters, not
+  numbers, so they never look like the gallery's `1`–`9` shortcuts;
+- **will be swapped:** a solid outline with a violet-to-blue gradient
+  (2.25 pt, over a soft dark halo so it reads on skin and on white walls),
+  the badge filled violet, and a chip with the avatar and name of the face it
+  becomes;
+- **left as is:** four white corner marks, a dark badge and no chip.
+  Hovering brightens the marks, shows a pointing hand and a quiet
+  *Choose a face…* chip; the face you clicked glows teal-blue while its menu
+  is open;
+- chips stay inside the photo and never overlap each other or the state
+  chip: each goes 8 pt under its face if it fits there, otherwise just inside
+  the bottom of the outline, otherwise above the face;
+- a state chip labels the photo, above its top-left corner when there is
+  room and on the corner otherwise: *Swapped · hold Space to compare* after
+  a swap, *Original* (the light chip) while you compare, when the face marks
+  are hidden too.
 
 The other states of the stage:
 
 - **Empty:** a dashed drop zone with a photo icon, *Drop photos or a video
-  here* and *Or press Open. Several photos or a whole folder work too.*
-  While files are dragged over it, the stage dims behind a dashed accent
-  frame.
-- **Busy:** a small dark panel in the middle with a spinner and words
-  (*Finding faces…*, *Swapping faces…*, *Making the video…*); for a video
-  also a progress bar and *Frame 120 of 900 · 13 fps · 1:00 left*.
-- **Batch:** a title that counts (*3 of 12 done*) over one row per photo:
-  thumbnail, name, a coloured dot and the status (grey *Waiting*, teal
-  *Swapping…*, green *Saved*, yellow *No face*, red *Failed*). The list keeps
-  the photo being worked on in view.
+  here* and *Or press Open. Several photos or a whole folder work too.*, and
+  at the bottom *Pick who to become on the right · ⌘⇧O opens files*. The
+  whole zone is clickable (it opens files) and brightens on hover. The icon
+  and text sit exactly where the Live stage's idle ones do, so switching
+  modes doesn't jump. While files are dragged over it, the stage dims behind
+  a dashed accent frame.
+- **Busy:** the photo dims and the busy capsule (below) in its middle says
+  what is happening (*Finding faces…*, *Swapping faces…*, *Making the
+  video…*); for a video also a progress bar and *Frame 120 of 900 · 13 fps ·
+  1:00 left*.
+- **Batch:** the batch list (below).
 
-**Choosing faces.** Clicking a face opens a menu: *Face 2 · woman, about 30*
+**Choosing faces.** Clicking a face opens a menu: *Face B · woman, about 30*
 as a header, **Leave as is**, then the gallery faces with round avatars, the
 most natural-looking first and the best ones marked *★ good match*. The
 current choice is ticked. Clicking a face in the gallery (or `1`–`9`) works
-here too.
+here too; `Esc` or a click elsewhere drops the highlight.
 
-**The control bar**, left to right: **Open…** (+); **Give everyone the
-selected face** (two people, shown once faces are found); the
-**Enhance faces** switch (*Enhance faces (slower)* for a video, where it is a
-separate setting); the primary button in the middle; **Show in Finder** (a
-folder, once something is saved) and **compare** (a half-filled circle, once
-a photo is swapped) on the right.
+**The control bar** is the same component as in Live, left to right:
+**Open…** (+, only once something is open: before that the big button says
+*Open…*); **Give everyone Anna’s face** (two people, only with two or more
+faces); the **Enhance faces** switch and its label (the tooltip says
+*Enhance faces (slower)* for a video, where it is a separate setting); the
+primary button in the middle; **compare** (a half-filled circle, once a
+photo is swapped) and **Show in Finder** (a folder) on the right. The folder
+button appears only where the big button says something else: after a video
+(the big button says **Play video**) or after a cancelled batch that saved
+some photos (**Continue · N left**). Otherwise the big button itself says
+**Show in Finder**.
 
 **One primary button that always shows the next step.** It never offers
-something that can't be done yet:
+something that can't be done:
 
 | Opened | The button reads |
 |---|---|
 | nothing | **Open…** |
 | a photo | **Swap** → **Save** → **Show in Finder** |
 | several photos or a folder | **Swap in N photos** → **Cancel** (while it runs) → **Show in Finder** |
-| a video | **Make video** → **Cancel** (while it runs) → **Open video** |
+| a video | **Make video** → **Cancel** (while it runs) → **Play video** |
+| a photo or video with no faces | **Open another…** |
+| faces, but nobody set to be swapped | *Pick a face on the right* (muted) |
 
-While faces are being found or a photo is being swapped or saved, it shows a
-spinner and *Working…*. Changing who becomes whom after a swap takes it back
-to **Swap**, because the result on screen no longer matches.
+While a photo is being read, swapped or saved, the button names the step
+next to a spinner (*Finding faces…*, *Swapping faces…*, *Saving…*) and can't
+be clicked. The muted *Pick a face on the right* can: it explains in a toast.
+Changing who becomes whom, **Enhance faces** or a *Look* setting after a
+swap takes it back to **Swap**, because the result on screen no longer
+matches.
 
 **Hold to compare.** Press and hold the compare button, or hold `Space`, to
 see the original; let go to see the result again. It is a hold, not a
 toggle, so you can never forget which one you are looking at, and the chip
 says *Original* while you hold. (`Space` is Start / Stop only in Live.)
+
+## Components
+
+The shared pieces live in `mirage/ui/widgets.py`; sizes are in points.
+
+**Control bar** (`ControlBar`). A glass bar 76 pt tall with 18 pt side
+margins, holding a left group, a right group and one centre widget, the
+primary button. The button sits in the exact middle of the bar, not of the
+space between the groups, so it never shifts when a button next to it
+appears or disappears. If it would come within 16 pt of a group, the widgets
+marked collapsible fold away first (the *Enhance faces* label, which stays
+on as the switch's tooltip); only if that is still not enough does the
+button slide aside, and never over a group. The bar decides from sizes
+alone, not from what is visible at the moment, so it doesn't flip back and
+forth.
+
+**Primary button.** A pill 52 pt tall and at least 220 pt wide (wider for a
+long label), with an 18 pt icon and a 15 pt semibold label. Four looks: a
+violet-to-blue gradient for the next step, red for **Stop** and **Cancel**,
+translucent white with a spinner while busy (not clickable), and
+translucent white with an icon for a hint such as *Pick a face on the
+right*. A glassy sheen on its upper half brightens on hover; it shrinks to
+96.5 % while pressed.
+
+**Icon buttons.** Round, 36 pt in the control bars and 24 pt for help in the
+title bar, with a faint white fill that brightens on hover. The camera icon
+next to the camera menu is a label, not a button. A toggle that is on (the
+mirror) is a quiet ring: a teal-blue edge and icon over a slightly brighter
+fill, not a solid coloured disc.
+
+**Chips.** One spec for every small label over video or a photo
+(`draw_chip()`): 26 pt tall, fully rounded, 12 pt text (semibold for names
+and states), with an optional 8 pt status dot or a 20 pt round avatar. Three
+tones: *dark*, the default (near-black at about 70 %, a faint white edge,
+white text); *quiet* (a little more see-through, secondary text: hints and
+counts); and *light* (white with dark text: *Original*). Live uses them 16 pt
+in from the stage's edges for *LIVE* (a red dot), the fps, the face's name
+and *Looking for your face…*; Photos & videos for the face chips, the state
+chip, the batch count pills and the status on each batch row.
+
+**Status pill.** 26 pt tall in the title bar: an 8 pt dot and a short status
+(*Ready*, *Loading models…*, *Live · 14 fps*). The dot breathes, a slow 2 s
+pulse, while models load, while the camera starts and while you are live.
+Its width is measured with every digit as wide as the widest one, so a
+changing fps count never makes it wobble.
+
+**Disclosure row.** *More options* in the *Look* section is a full-width,
+30 pt row, not an on/off switch: a 12.5 pt label in the secondary colour
+(white on hover and while open) and a chevron at the right edge, where the
+switches line up: ⌄ closed, ⌃ open. Open, it shows *Swap everyone in view*,
+*Fix blue tint*, *Smooth edges* and *Show fps* under it. In Photos & videos
+the row is hidden and *Smooth edges* shows directly under the rest.
+*Strength* and *Sharpness* explain themselves in a tooltip.
+
+**Toasts.** Dark rounded capsules (16 pt radius, up to 460 pt wide) with a
+dot in the colour of their level: teal-blue for info, yellow for a warning,
+red for an error. They are centred over the stage and float 18 pt above the
+control bar, so they never cover its buttons; up to three stack upwards, the
+newest at the bottom. A click dismisses one.
+
+**Busy capsule** (Photos & videos). A dark capsule (18 pt radius) in the
+middle of the photo, which dims behind it, or of the stage when there is no
+photo yet: a 22 pt spinner ring and 13.5 pt semibold words. It is 48 pt tall
+(62 pt when the words wrap onto two lines) and 200–520 pt wide. For a video
+it grows by a 5 pt violet-to-blue progress bar and a line with the frames,
+the speed and the time left, and is at least 340 pt wide.
+
+**Batch list** (Photos & videos). A column up to 720 pt wide in the middle
+of the stage:
+
+- a header with the title, *N photos* (17 pt semibold), and a subtitle under
+  it that follows the job: who everyone becomes (*The main face in each
+  becomes Anna*), then *Swapping faces… 2 of 3*, then *Done · saved next to
+  the originals* or *Stopped · N left*;
+- quiet count pills on the right of the header (*Saved 2*, *No face 1*,
+  *Failed 1*), each only once it is above zero; *No face* includes
+  *Skipped*;
+- a 4 pt progress bar under the header while it runs;
+- one row per photo, 56 pt tall with 8 pt between rows and a 14 pt radius: a
+  40 pt thumbnail, centre-cropped so it is never squeezed; the file name,
+  shortened in the middle if it is long; an error's detail in small grey
+  text under the name; and a status pill on the right with a coloured dot:
+  grey *Waiting*, teal-blue *Swapping…*, green *Saved*, yellow *No face*,
+  grey *Skipped*, red *Failed*.
+
+The row being worked on gets a teal-blue edge and is kept in view; otherwise
+the wheel scrolls the list a row at a time, with a thin scroll indicator on
+the right. When the list is on screen, a finished batch doesn't also pop a
+toast; one appears only if something failed or the window isn't showing the
+list.
 
 ## How the Liquid Glass works
 
@@ -194,15 +317,18 @@ Looks are never a reason to crash.
    Everything else is secondary and can be ignored on day one.
 2. **Words for every state.** The user should never have to guess: *Loading
    models…*, *Starting camera…*, *Live* with the fps, *Looking for your
-   face…*, *Zoom camera: “OBS Virtual Camera”*. A spinner alone is not a
-   status.
-3. **Toasts, not modal errors.** Problems appear as a short glass toast that
-   says what happened and what to do (“No face found in ‘beach.jpg’. Try a
-   clear, front-facing photo.”). No error dialog ever pops up during a call;
-   the only dialogs are the ones you ask for, like renaming or removing a
-   face.
+   face…*, *Zoom camera: “OBS Virtual Camera”*, *Swapping faces…*. A spinner
+   alone is not a status, and a button never offers what can't be done yet:
+   it says what is missing instead (*Pick a face on the right*).
+3. **Toasts, not modal errors.** Problems appear as a short toast above the
+   control bar that says what happened and what to do (“No face found in
+   ‘beach.jpg’. Try a clear, front-facing photo.”). No error dialog ever pops
+   up during a call; the only dialogs are the ones you ask for, like renaming
+   or removing a face. A toast doesn't repeat what the screen already shows
+   (a finished batch list needs none).
 4. **Faces are the content.** Big round thumbnails you can recognise at a
-   glance; `1`–`9` match their order, `0` is always you.
+   glance; `1`–`9` match their order, `0` is always you. Faces found in a
+   photo get letters instead, so the two never get mixed up.
 5. **Keyboard first, mouse friendly.** Every common action has a shortcut
    (see the [README](../README.md#keyboard-shortcuts)); everything also works
    with a click or a drag.
@@ -223,11 +349,11 @@ The current values live in `mirage/theme.py`; this is the intent behind them.
 
 | Token | Value | Use |
 |---|---|---|
-| Accent | `#8B7CFF` soft violet, to `#5AC8FA` teal-blue | primary button, slider fill, faces that will be swapped |
+| Accent | `#8B7CFF` soft violet, to `#5AC8FA` teal-blue | slider fill, switches, progress bars, faces that will be swapped; the primary button uses a slightly deeper `#7C6CFF` → `#3FA7F5` |
 | Live | `#FF453A` (system red, dark) | live badge, Stop |
 | Ready | `#32D74B` (system green, dark) | ready and connected states |
-| Text | white at ~92% / ~59% / ~37% | primary / secondary / tertiary |
-| Radii | 28–30 pt | panels, stage, control bar |
+| Text | white at ~92% / ~67% / ~48% | primary / secondary / tertiary |
+| Radii | 28–30 pt; 12 pt; fully round | panels, stage, control bar; the photo in Photos & videos; buttons, chips, pills |
 | Spacing | 16 pt margins, 14 pt gaps | everywhere |
 
 ### Motion

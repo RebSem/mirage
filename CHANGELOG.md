@@ -4,11 +4,102 @@ All notable changes to Mirage are written down here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
-Mirage is built on [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam);
-changes listed here are relative to Deep-Live-Cam `main` as of September 2026
-(commit `759e3f9`).
+Mirage's face-swap engine is
+[Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam), included in
+`third_party/deep-live-cam/`. Where an entry compares with upstream, it means
+Deep-Live-Cam `main` as of September 2026 (commit `759e3f9`).
 
 ## [Unreleased]
+
+### Added
+
+- [`third_party/deep-live-cam/README.md`](third_party/deep-live-cam/README.md):
+  which upstream commit the engine is based on, every change Mirage made to
+  it, and how to update it. `scripts/update_engine.sh` (or
+  `make update-engine`) brings in newer Deep-Live-Cam changes with a
+  three-way merge and records the new base commit.
+- `make install-app` also puts a `Mirage.app` shortcut in the project folder,
+  next to the code, so Mirage opens from there too (git ignores it).
+
+### Changed
+
+- The Deep-Live-Cam engine moved from the top of the repository (`modules/`,
+  `locales/`, `run.py`, …) into `third_party/deep-live-cam/`, so the
+  repository is laid out as Mirage's own, with the engine in a clearly
+  labelled folder. The engine is still imported as `modules`, and
+  `make classic` works as before. After you pull this change, `make install`
+  or `make clean` removes the empty `modules/` folder git leaves behind.
+- A clean repository history: the first commit imports the Deep-Live-Cam
+  engine exactly as upstream published it at `759e3f9`, and every commit
+  after it is Mirage's. Deep-Live-Cam's own history stays in
+  [its repository](https://github.com/hacksider/Deep-Live-Cam).
+- The READMEs and the app's copyright line (Finder → Get Info) credit the
+  engine as "Face-swap engine: Deep-Live-Cam by hacksider and contributors",
+  and the READMEs show a screenshot.
+- `make test` and CI also run the engine's own tests.
+- The window got a polish:
+  - **Title bar:** the **Live | Photos & videos** switch sits in the middle
+    of the window and no longer moves. In Photos & videos the status pill
+    and the OBS Virtual Camera hint show only while a call runs in the
+    background, and the **?** button only in Live. Russian *Готово* is now
+    *Готов к эфиру*.
+  - **Control bars:** the big button is always in the exact centre; on a
+    narrow window the *Enhance faces* label folds away into the switch's
+    tooltip. **+** is hidden while nothing is open (the big button already
+    says **Open…**), and the folder button appears only when the big button
+    says something else, such as **Play video** (formerly *Open video*).
+  - **Faces in a photo** are lettered A, B, C… so they don't look like the
+    gallery's `1`–`9` shortcuts. A face that will be swapped has a solid
+    violet-to-blue outline and a chip with the new face's avatar and name; a
+    face left as is gets corner marks and, on hover, *Choose a face…*. Chips
+    stay inside the photo and never overlap. The photo has rounded corners,
+    is labelled *Swapped · hold Space to compare* after a swap, and dims
+    while Mirage works, under a small capsule that says what is happening
+    (with a progress bar for videos).
+  - **The big button never offers something impossible:** *Open another…*
+    when no faces were found, a muted *Pick a face on the right* when nobody
+    is set to be swapped, and the current step while busy (*Finding
+    faces…*, *Swapping faces…*, *Saving…*).
+  - **Batches:** a *N photos* header with a subtitle that follows the job,
+    count pills (*Saved*, *No face*, *Failed*), a progress bar, bigger
+    thumbnails, a status pill on each row and error details under the file
+    name. No toast repeats the result while the list is on screen. In
+    Russian the buttons read *Заменить в N фото* and *Продолжить · ещё N*.
+  - **Empty Photos & videos:** the whole drop zone opens files, with the
+    hint *Pick who to become on the right · ⌘⇧O opens files*.
+  - **Look:** in Photos & videos only the settings that change a file are
+    shown (*Strength*, *Sharpness*, *Keep my mouth*, *Smooth edges*), and
+    changing one after a swap turns the big button back into **Swap**.
+    *Blend* is now *Strength* (*Сила замены*), *Show FPS* is *Show fps*
+    (*Показывать к/с*), the Russian presets are
+    *Скорость / Баланс / Качество*, and **More options** (*Дополнительно*)
+    is a row with a chevron rather than a switch. *Strength* and
+    *Sharpness* have tooltips.
+  - **Sidebar:** *Look* sits right under the faces, and opening
+    **More options** grows the panel downwards without moving anything.
+  - **Live:** the idle stage says *Press Start to go live as Anna* once a
+    face is picked, the camera menu has a chevron, the mirror button is a
+    quiet ring when on, and toasts float above the control bar instead of
+    covering its buttons.
+
+### Removed
+
+- Upstream files Mirage doesn't use: the demo images (`media/`), the Windows
+  launchers (`run-cuda.bat`, `run-directml.bat`) and the copy of upstream's
+  README (`docs/upstream/README.md`); the READMEs link to
+  [the original](https://github.com/hacksider/Deep-Live-Cam/blob/759e3f985811985cf6c00a3e43e9579652c318f5/README.md)
+  instead.
+- From `requirements.txt`, packages Mirage doesn't use on Apple Silicon:
+  upstream's NSFW filter (opennsfw2, keras) and its Windows, Linux and Intel
+  Mac packages.
+
+### Fixed
+
+- Opening a folder of photos right after saving a single photo showed a
+  folder button that pointed at the old photo.
+- Batch thumbnails were squeezed; they are now centre-cropped.
+- In Photos & videos the big button offered **Swap** when nothing could be
+  swapped (no faces found, or nobody set to be swapped).
 
 ## [0.2.0] - 2026-09-28
 

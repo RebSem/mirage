@@ -3,12 +3,20 @@
 <h1 align="center">Mirage</h1>
 
 <p align="center">
-  Wear a different face on your video calls. Live, on your Mac, just for fun.
+  Wear a different face on video calls, live, and in your photos and videos.
+  On your Mac, just for fun.
+</p>
+
+<p align="center">
+  <sub>Face-swap engine: <a href="https://github.com/hacksider/Deep-Live-Cam">Deep-Live-Cam</a> by hacksider and contributors (AGPL-3.0)</sub>
 </p>
 
 <p align="center">
   <img src="assets/icon/mirage-256.png" alt="Mirage icon" width="128">
-  <!-- screenshot: docs/images/mirage-hero.png (added once captured) -->
+</p>
+
+<p align="center">
+  <img src="docs/images/mirage-photos.jpg" alt="The Mirage window in Photos &amp; videos mode: the faces in a photo are marked A, B and C, and one of them gets a face from the library on the right" width="900">
 </p>
 
 Mirage is a small macOS app for real-time face swapping. Pick a photo, press
@@ -16,12 +24,15 @@ Mirage is a small macOS app for real-time face swapping. Pick a photo, press
 generated stranger, or yourself again with one key. It can also swap faces
 in the photos and videos you already have.
 
-It is a hobby project: a nicer, macOS-native frontend with Apple's Liquid Glass
-look, built on top of the excellent open-source
+It is a hobby project, a macOS-native app with Apple's Liquid Glass look. The
+face swap itself comes from the excellent open-source
 [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) engine by hacksider
-and contributors. The heavy lifting (face detection, the swap model, the
-enhancers) is theirs. Mirage adds the window, the face library, the virtual
-camera plumbing, and a pile of stability fixes.
+and contributors: face detection, the swap model and the enhancers are theirs.
+Mirage includes a copy of that engine (in
+[`third_party/deep-live-cam/`](third_party/deep-live-cam/README.md), with a
+few fixes) and builds everything else around it: the window, the face
+library, Photos & videos, the virtual camera output and a pile of stability
+fixes.
 
 > [!IMPORTANT]
 > **Consent first.** Only use someone else's face if they are fine with it, and
@@ -46,10 +57,12 @@ camera plumbing, and a pile of stability fixes.
   original. See [Photos & videos](#photos--videos).
 - **Simple controls** in the *Look* section. Quality presets
   **Fast / Balanced / Best** (Best adds face enhancement), *Keep my mouth*
-  (your real mouth stays in the picture, so talking looks natural), a blend
-  slider and a sharpness slider. Under **More**:
+  (your real mouth stays in the picture, so talking looks natural), a
+  *Strength* slider and a *Sharpness* slider. Under **More options**:
   *Swap everyone in view* (every face in the picture gets the one you picked),
-  *Fix blue tint*, *Smooth edges* and *Show FPS*.
+  *Fix blue tint*, *Smooth edges* and *Show fps*. In Photos & videos the
+  section shows only what changes a file: *Strength*, *Sharpness*,
+  *Keep my mouth* and *Smooth edges*.
 - **Made for calls.** Video goes straight to **OBS Virtual Camera** at a fixed
   1280×720, so Zoom never sees the stream restart when your webcam switches
   between 4:3 and 16:9. It keeps working with the window minimised, and keeps
@@ -102,11 +115,14 @@ make run
 or build a proper app (`dist/Mirage.app`) and put it in `~/Applications`:
 
 ```bash
-make app && make install-app
+make install-app
 ```
 
-`Mirage.app` runs the code in the folder you cloned, so don't move or delete
-that folder. If you do move it, run `make install-app` again from the new place.
+`make install-app` also puts a `Mirage.app` shortcut in the project folder,
+next to the code, so you can start Mirage from there as well as from
+Launchpad or Spotlight. `Mirage.app` runs the code in the folder you cloned,
+so don't move or delete that folder. If you do move it, run
+`make install-app` again from the new place.
 
 The first time you press Start, Mirage asks macOS for camera access and waits
 for your answer. Click **Allow** (said no by accident? See
@@ -116,6 +132,10 @@ virtual camera does not show up in Zoom yet, open OBS and click
 [Troubleshooting](docs/TROUBLESHOOTING.md#obs-virtual-camera-is-missing)).
 
 ## Use it in Zoom (or Meet, or anything else)
+
+<p align="center">
+  <img src="docs/images/mirage-live.jpg" alt="Mirage live: the camera picture with the chosen face, the red Stop button, and the face library on the right" width="900">
+</p>
 
 1. Open Mirage and pick a face (or `0` to stay yourself for now).
 2. Press **Start** (or `Space`). Wait for *Live*.
@@ -138,21 +158,24 @@ file). Your faces and the *Look* settings on the right work in both modes, but
 each mode remembers its own selected face: picking faces for a photo never
 changes the face you wear in a running call.
 
-1. **Open** photos or a video: click **Open…**, press `⌘⇧O`, or drag files
-   or a folder onto the stage. Photos dropped on the sidebar are added to your
-   faces instead.
-2. **Check who gets swapped.** Every face gets a numbered outline, and the
-   face selected on the right goes to one person: you, if one of your faces is
-   marked **This is me** (right-click it) and you are in the picture;
-   otherwise the main face, that is the largest one (or, of two about the same
-   size, the one nearer the centre). Everyone else is left as is. A solid
-   outline means *will be swapped*, a dashed one *left as is*.
-3. **Change it with a click.** Click a face in the picture to choose who it
-   becomes, or *Leave as is*. The most natural-looking choices (same gender,
-   similar age) come first, and ★ marks a good match. **Give everyone the
-   selected face** (the button with two people) swaps them all.
-4. **Swap**, then **Save** (`⌘S`); the big button always shows the next step.
-   Hold the compare button (or `Space`) to see the original.
+1. **Open** photos or a video: click **Open…** (or anywhere in the empty
+   drop zone), press `⌘⇧O`, or drag files or a folder onto the stage. Photos
+   dropped on the sidebar are added to your faces instead.
+2. **Check who gets swapped.** Faces are marked with letters (A, B, C… from
+   left to right), and the face selected on the right goes to one person:
+   you, if one of your faces is marked **This is me** (right-click it) and
+   you are in the picture; otherwise the main face, that is the largest one
+   (or, of two about the same size, the one nearer the centre). Everyone else
+   is left as is. A face that will be swapped gets a solid outline and a chip
+   with its new face; a face left as is only gets four corner marks.
+3. **Change it with a click.** Click a face in the picture (hovering shows
+   *Choose a face…*) to choose who it becomes, or *Leave as is*. The most
+   natural-looking choices (same gender, similar age) come first, and ★ marks
+   a good match. With several faces, the button with two people
+   (*Give everyone Anna’s face*) swaps them all.
+4. **Swap**, then **Save** (`⌘S`); the big button always shows the next step
+   (and says *Pick a face on the right* while nobody is set to be swapped).
+   Hold the compare button (or `Space`) to compare with the original.
 
 The result is saved next to the original as `name-mirage.jpg` (in the
 original's format; iPhone HEIC photos become JPEG). The original is never
@@ -162,13 +185,16 @@ faces were swapped with Mirage.
 
 **Many photos at once.** Drop several photos or a folder, then press
 **Swap in N photos**. Each photo gets the automatic choice from step 2 and
-is saved next to its original. Photos without a face are marked *No face*;
-**Cancel** stops after the current photo.
+is saved next to its original; the list shows how far it got and what
+happened to each photo. Photos without a face are marked *No face*;
+**Cancel** stops after the current photo, and **Continue · N left** picks up
+where it stopped.
 
 **Videos.** Open a video (MP4, MOV, M4V, MKV, AVI or WebM), check who gets
 swapped on the frame Mirage shows, and press **Make video**. You see the
-progress and the time left; **Cancel** deletes the unfinished file. The
-result, `name-mirage.mp4`, keeps the original sound and frame rate, and
+progress and the time left; **Cancel** deletes the unfinished file. When it
+is done, **Play video** opens it and the folder button shows it in Finder.
+The result, `name-mirage.mp4`, keeps the original sound and frame rate, and
 iPhone HDR videos come out in standard (SDR) colour. People are followed by
 who they are, not where they are, so the right face stays on the right
 person. A 720p video renders at about 13–14 frames per second on a MacBook
@@ -186,7 +212,7 @@ The details (how Mirage decides, renders and saves) are in
 
 | Key | Action |
 |---|---|
-| `Space` | Start / Stop. In Photos & videos: hold to see the original |
+| `Space` | Start / Stop. In Photos & videos: hold to compare with the original |
 | `1` – `9` | Switch to face 1–9. In Photos & videos: every face being swapped gets it (or only the face you clicked) |
 | `0` | Your real face. In Photos & videos: swap nobody (or leave the face you clicked as is) |
 | `Esc` | In Photos & videos: deselect the face you clicked |
@@ -225,17 +251,38 @@ thispersondoesnotexist.com when you press 🎲.
 To start from scratch, quit Mirage and delete
 `~/Library/Application Support/Mirage`.
 
-## The classic Deep-Live-Cam UI
+## The classic Deep-Live-Cam window
 
-The original Deep-Live-Cam window is still here and still works. Mirage now
-swaps faces in photos and videos itself; the classic UI remains for face
-mapping and its own options:
+Deep-Live-Cam's own window comes with the engine and still works. Mirage
+handles calls, photos and videos itself; the classic window is there for face
+mapping and its other options:
 
 ```bash
-make classic        # or: source venv/bin/activate && python run.py
+make classic        # or: venv/bin/python third_party/deep-live-cam/run.py --execution-provider coreml
 ```
 
-Its original README is kept at [docs/upstream/README.md](docs/upstream/README.md).
+How to use it is described in the
+[Deep-Live-Cam README](https://github.com/hacksider/Deep-Live-Cam/blob/759e3f985811985cf6c00a3e43e9579652c318f5/README.md)
+for the version Mirage includes. What Mirage changed in the engine is listed
+in [third_party/deep-live-cam/README.md](third_party/deep-live-cam/README.md).
+
+## Project layout
+
+```
+mirage/                      the Mirage app: window, face library, Live, Photos & videos
+third_party/deep-live-cam/   the face-swap engine: Deep-Live-Cam, with Mirage's fixes
+scripts/                     installer, app bundle, icon, benchmark, engine update
+tests/mirage/                Mirage's unit tests (no models, camera or network needed)
+docs/                        documentation
+assets/icon/                 the app icon
+models/                      downloaded models (make install fills it; not in git)
+Mirage.app                   shortcut to the installed app, made by make install-app (not in git)
+```
+
+Mirage's own code is in `mirage/`. The engine is Deep-Live-Cam as of upstream
+commit `759e3f9`, with a few changes; [its README](third_party/deep-live-cam/README.md)
+says what Mirage changed and how to bring in newer upstream versions
+(`scripts/update_engine.sh`).
 
 ## Project docs
 
@@ -246,8 +293,11 @@ Its original README is kept at [docs/upstream/README.md](docs/upstream/README.md
 - [Responsible use](docs/RESPONSIBLE_USE.md): the ground rules.
 - [Design](docs/DESIGN.md): how the Liquid Glass window is put together.
 - [Architecture](docs/ARCHITECTURE.md): threads, modules, file layout.
+- [Engine](third_party/deep-live-cam/README.md): where the Deep-Live-Cam
+  engine comes from, what Mirage changed in it, how to update it.
 - [Contributing](CONTRIBUTING.md) and the [changelog](CHANGELOG.md).
-- [Notice](NOTICE.md): what changed versus upstream, third-party licenses.
+- [Notice](NOTICE.md): the license notice for the included engine,
+  third-party licenses, model terms.
 
 ## Contributing
 
@@ -281,11 +331,13 @@ live.
 
 ## License
 
-Mirage is a modified version of Deep-Live-Cam and, like it, is licensed under
-the [GNU AGPL-3.0](LICENSE). The pretrained face models come with their own
-terms (InsightFace models are for non-commercial research use only), which is
-why Mirage is a just-for-fun, non-commercial project. See [NOTICE.md](NOTICE.md)
-for the full picture.
+Mirage is free software under the [GNU AGPL-3.0](LICENSE). It includes a
+modified copy of the Deep-Live-Cam engine (AGPL-3.0, in
+[`third_party/deep-live-cam/`](third_party/deep-live-cam/README.md)), so the
+whole app is under the same license. The pretrained face models come with
+their own terms (InsightFace models are for non-commercial research use
+only), which is why Mirage is a just-for-fun, non-commercial project. See
+[NOTICE.md](NOTICE.md) for the full picture.
 
 Mirage is not affiliated with Apple, Zoom, Google, OBS or the Deep-Live-Cam
 team.
