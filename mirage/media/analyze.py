@@ -6,6 +6,7 @@ competes with a live session for the Neural Engine.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 
@@ -14,6 +15,8 @@ import numpy as np
 
 from mirage.media.plan import number_left_to_right
 from mirage.media.types import TargetFace
+
+log = logging.getLogger(__name__)
 
 SMALL_FACE = 0.06          # faces narrower than 6 % of the image → try a finer pass
 NMS_IOU = 0.4
@@ -94,17 +97,22 @@ def analyze_image(image: np.ndarray) -> list[TargetFace]:
         return []
     configure_upstream()
     recognizer = get_face_analyser().models["recognition"]
-    attributes = _genderage()
+    try:
+        attributes = _genderage()   # only for the suggestions: never a reason to fail
+    except Exception:
+        log.warning("gender/age model unavailable; suggestions go without it", exc_info=True)
+        attributes = None
     targets: list[TargetFace] = []
     for box, kps in detect_faces(image):
         face = Face(bbox=box[:4].astype(np.float32), kps=kps.astype(np.float32), det_score=float(box[4]))
         recognizer.get(image, face)
         gender = age = None
-        try:
-            attributes.get(image, face)
-            gender, age = int(face.gender), float(face.age)
-        except Exception:
-            pass
+        if attributes is not None:
+            try:
+                attributes.get(image, face)
+                gender, age = int(face.gender), float(face.age)
+            except Exception:
+                pass
         targets.append(TargetFace(
             index=0,
             bbox=tuple(float(v) for v in box[:4]),

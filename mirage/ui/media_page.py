@@ -419,8 +419,9 @@ class MediaPage(QWidget):
 
     def look_changed(self) -> None:
         """Blend, sharpness, mouth or edges changed: the photo on screen no longer matches."""
-        if not self.busy and self.kind == PHOTO and self.result is not None:
-            self._invalidate_output()
+        if not self.busy and ((self.kind == PHOTO and self.result is not None)
+                              or (self.kind == VIDEO and self.saved_path is not None)):
+            self._invalidate_output()   # the saved file stays; the next one is name-mirage-2
             self._refresh()
 
     def clear_active(self) -> None:
@@ -561,6 +562,9 @@ class MediaPage(QWidget):
             log.exception("could not load face embeddings")
             self._toast(tr("media_failed", name=self.path.name if self.path else "", error=exc), "error")
             return
+        if not embeddings:  # the planned faces are gone from the library
+            self._toast(tr("media_pick_face"), "info")
+            return
         self._warn_if_live()
         token = self._token
         self.busy = True
@@ -655,6 +659,15 @@ class MediaPage(QWidget):
         if not selected:
             self._toast(tr("media_pick_face"), "info")
             return
+        try:
+            embeddings = self._embeddings([selected])
+        except Exception as exc:  # a damaged face file: say so, and stay usable
+            log.exception("could not load the face embedding")
+            self._toast(tr("media_failed", name="", error=exc), "error")
+            return
+        if not embeddings:
+            self._toast(tr("media_pick_face"), "info")
+            return
         self._warn_if_live()
         # Continue where a cancelled run stopped: only the files still waiting.
         pending = [(i, item) for i, item in enumerate(self.batch_items) if item.status == "waiting"]
@@ -668,7 +681,6 @@ class MediaPage(QWidget):
                              tr("media_batch_progress", done=done, total=len(self.batch_items)),
                              done / max(1, len(self.batch_items)))
         me, selected_is_me = self._me_embedding(), self._selected_is_me()
-        embeddings = self._embeddings([selected])
         options = RenderOptions(enhance=self.settings.photo_enhance)
         cancel = self._cancel
         renderer = self._renderer_obj()
@@ -736,11 +748,19 @@ class MediaPage(QWidget):
         if self._renderer is not None:
             self._renderer.release()  # video doesn't use GFPGAN: give its ~1.5 GB back first
         identities = []
-        for t in self.targets:
-            sid = self.plan.get(t.index)
-            entry = self.library.get(sid) if sid else None
-            if entry is not None:
-                identities.append(VideoIdentity(t.embedding, self.library.embedding(sid), entry.name))
+        try:
+            for t in self.targets:
+                sid = self.plan.get(t.index)
+                entry = self.library.get(sid) if sid else None
+                if entry is not None:
+                    identities.append(VideoIdentity(t.embedding, self.library.embedding(sid), entry.name))
+        except Exception as exc:
+            log.exception("could not load a face embedding")
+            self._toast(tr("media_failed", name=self.path.name if self.path else "", error=exc), "error")
+            return
+        if not identities:  # the planned faces are gone from the library
+            self._toast(tr("media_pick_face"), "info")
+            return
         token = self._token
         self.busy = True
         self._cancel = threading.Event()
@@ -865,9 +885,10 @@ class MediaPage(QWidget):
                 self.primary.set_mode("hint", tr("media_pick_face_short"), icon="person")
             else:
                 self.primary.set_mode("start", tr("media_render_video"), icon="film")
-        # A running job reads Look on every frame; don't let a slider change half a video.
+        # A running job reads Look on every frame; don't let a slider change half a video
+        # (from either page: Live shares the same Look panel).
         look = getattr(self.win, "look", None)
-        if look is not None and self.win.pages.currentWidget() is self:
+        if look is not None:
             look.setEnabled(not busy)
 
     def _job_finished(self) -> None:
@@ -907,4 +928,5 @@ class MediaPage(QWidget):
         from mirage.media import photo_io
 
         if not photo_io.SAVE_LOCK.acquire(timeout=3.0):   # released only by the process exiting
-            log.warning("a photo was still being written at quit")
+            log.warning("a photo was still being written at quit; removing its temp file")
+            photo_io.discard_unfinished()

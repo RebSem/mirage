@@ -444,8 +444,13 @@ class FaceLibrary:
             self._set_index_aside()
             self._rebuild_from_files()
             return
-        except OSError as exc:  # unreadable right now (permissions…): leave everything as is
-            log.warning("Face library index %s can't be read: %s", path, exc)
+        except OSError as exc:
+            # Unreadable (permissions, a disk error). Starting empty would let the next
+            # import overwrite it and lose every face, so treat it like a corrupt index:
+            # keep it aside (names stay in that copy) and rebuild from the face files.
+            log.warning("Face library index %s can't be read, rebuilding from files: %s", path, exc)
+            self._set_index_aside()
+            self._rebuild_from_files()
             return
         faces = data.get("faces") if isinstance(data, dict) else None
         if not isinstance(faces, list):

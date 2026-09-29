@@ -201,7 +201,8 @@ class LiveEngine(QObject):
             except Exception:
                 log.exception("enhancer failed to load")
                 self._enhancer_state = "failed"
-            if self._enhancer_state == "failed":
+            # Fall back only if Best is still chosen: the user may have moved on meanwhile.
+            if self._enhancer_state == "failed" and self._quality.enhancer:
                 self._quality = QUALITY["balanced"]  # what the toast promises
                 self.qualityFallback.emit("balanced")
                 self.notice.emit("warn", "toast_enhancer_failed", {})
@@ -469,7 +470,8 @@ class LiveEngine(QObject):
                         import importlib
 
                         enhancer = importlib.import_module(ENHANCER_MODULE)
-                        out = enhancer.process_frame(None, out, detected_faces=faces)
+                        for face in faces:  # every swapped face, not just the first
+                            out = enhancer.enhance_face(out, face)
             except Exception as exc:
                 kind = f"{type(exc).__name__}: {exc}"[:160]
                 if kind not in logged:

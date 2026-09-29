@@ -336,6 +336,14 @@ def output_path(src: Path, ext: str | None = None) -> Path:
 # Held while a file is being written. Quitting takes it (and keeps it), so the app can exit
 # at once mid-render without ever leaving a half-written temp file next to someone's photo.
 SAVE_LOCK = threading.Lock()
+_IN_FLIGHT: set[Path] = set()
+
+
+def discard_unfinished() -> None:
+    """Quitting while a save is stuck (a slow disk): remove its hidden temp file now."""
+    for tmp in list(_IN_FLIGHT):
+        with contextlib.suppress(OSError):
+            tmp.unlink()
 
 
 def save_image(image_bgr: np.ndarray, src: Path, meta: PhotoMeta) -> Path:
@@ -356,6 +364,7 @@ def save_image(image_bgr: np.ndarray, src: Path, meta: PhotoMeta) -> Path:
     # Hidden temp name in the same folder: O_EXCL, normal permissions, same volume.
     tmp = src.with_name(f".{src.stem}-mirage.{secrets.token_hex(4)}.tmp")
     with SAVE_LOCK:
+        _IN_FLIGHT.add(tmp)
         try:
             with open(tmp, "xb") as fh:
                 img.save(fh, format=pil_format, **options)
@@ -366,6 +375,8 @@ def save_image(image_bgr: np.ndarray, src: Path, meta: PhotoMeta) -> Path:
             with contextlib.suppress(OSError):
                 tmp.unlink()
             raise
+        finally:
+            _IN_FLIGHT.discard(tmp)
 
 
 def _output_ext(src: Path, fmt: str) -> str | None:

@@ -81,6 +81,26 @@ def _dark_appearance() -> None:
         pass
 
 
+REQUIRED_PACKAGES = ("PySide6", "numpy", "cv2", "onnxruntime", "insightface", "PIL", "AppKit", "AVFoundation")
+
+
+def _missing_packages() -> list[str]:
+    import importlib.util
+
+    return [name for name in REQUIRED_PACKAGES if importlib.util.find_spec(name) is None]
+
+
+def _alert_cannot_start(missing: list[str]) -> None:
+    """Mirage.app has no terminal: say what's wrong in a native alert (no Qt needed)."""
+    import subprocess
+
+    message = (f"Some parts of Mirage aren't installed ({', '.join(missing)}). "
+               f"Run make install in {paths.repo_root()}, then open Mirage again.")
+    script = ['/usr/bin/osascript', '-e', 'on run argv',
+              '-e', 'display alert "Mirage can\'t start" message (item 1 of argv) as critical', '-e', 'end run', message]
+    subprocess.run(script, check=False, capture_output=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="mirage", description="Mirage — real-time face swap for macOS")
     parser.add_argument("--debug", action="store_true", help="verbose logging")
@@ -89,6 +109,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     _setup_logging(args.debug)
+    missing = _missing_packages()
+    if missing:  # e.g. a venv from an older install: fail visibly instead of silently
+        log.critical("missing packages: %s", ", ".join(missing))
+        _alert_cannot_start(missing)
+        return 1
     _brand_process()
     os.chdir(paths.repo_root())  # a stable working directory (the engine's own files are found via __file__)
 
@@ -168,14 +193,13 @@ def main(argv: list[str] | None = None) -> int:
         window.media.shutdown()  # cancel a running render; a video deletes its partial file
         engine.shutdown()
         server.close()
-        if window.media.job_alive():
-            # A photo job can be inside a native call (a model compiling for the Neural
-            # Engine) that holds Python's lock for seconds, and Qt's own teardown would
-            # wait for it. Its result isn't wanted and nothing is being written (see
-            # MediaPage.shutdown), so leave now instead of looking frozen.
-            log.info("leaving without waiting for the photo job")
-            logging.shutdown()
-            os._exit(0)
+        # Everything that matters is saved and stopped. Leave now: a background thread
+        # can be inside a native call (a model compiling for the Neural Engine) that
+        # holds Python's lock for seconds, and Qt's own teardown would wait for it,
+        # so Mirage would look like it doesn't close.
+        log.info("bye")
+        logging.shutdown()
+        os._exit(0)
 
     window.closing.connect(cleanup)
     app.aboutToQuit.connect(cleanup)

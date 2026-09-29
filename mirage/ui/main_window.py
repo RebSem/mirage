@@ -200,6 +200,7 @@ class MainWindow(QWidget):
         self._refresh_cameras()
         self._reload_faces()
         self._select_face(settings.face_id, announce=False)
+        self.media.selected_id = self.settings.face_id   # checked against the library just now
         self.engine.apply(settings)
         self._on_state(self.engine.state)
         self._refresh_vcam_hint()
@@ -357,7 +358,7 @@ class MainWindow(QWidget):
         self._action(live_menu, tr("menu_start_stop"), None, self.toggle_live)
         self._action(live_menu, tr("menu_mirror"), "Ctrl+Shift+M", lambda: self.mirror_btn.toggle())
         faces_menu = bar.addMenu(tr("menu_faces"))
-        self._action(faces_menu, tr("menu_me"), None, lambda: self._select_face(None))
+        self._action(faces_menu, tr("menu_me"), None, lambda: self._on_tile(ME))
         help_menu = bar.addMenu(tr("menu_help"))
         self._action(help_menu, tr("menu_readme"), None, lambda: self._open_doc("README.md"))
         self._action(help_menu, tr("menu_troubleshooting"), None, lambda: self._open_doc("docs/TROUBLESHOOTING.md"))
@@ -529,7 +530,8 @@ class MainWindow(QWidget):
         for entry in self.library.list():
             pix = QPixmap(str(self.library.thumb_path(entry.id)))
             faces.append((entry.id, entry.name, pix))
-        self.grid.rebuild(faces, self.settings.face_id, self._busy_imports)
+        selected = self.media.selected_id if self.mode == MEDIA else self.settings.face_id
+        self.grid.rebuild(faces, selected, self._busy_imports)
         self.grid.parentWidget().parentWidget().updateGeometry()   # the _FitScroll around the grid
         self.empty_hint.setVisible(not faces)
 
@@ -784,7 +786,7 @@ class MainWindow(QWidget):
         self.grid.set_selected(self.media.selected_id if mode == MEDIA else self.settings.face_id)
         self.mode_switch.set_value(mode, animate=False)
         self.look.set_context(mode)
-        self.look.setEnabled(mode == LIVE or not self.media.busy)
+        self.look.setEnabled(not self.media.busy)
         self._refresh_top_bar()
         self._space.setEnabled(mode == LIVE)  # in Photos & videos Space means "hold to compare"
         self.toasts.sync_geometry()

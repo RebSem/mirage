@@ -539,6 +539,64 @@ def test_writer_abort_leaves_nothing_behind(clip_copy):
     assert not dst.exists()
 
 
+@needs_ffmpeg
+def test_writer_close_kills_a_slow_remux_on_cancel(clip_copy, tmp_path: Path):
+    src = clip_copy("plain")
+    info = V.probe(src)
+    dst = src.with_name("slow.mp4")
+    writer = V.FrameWriter(dst, info, src)
+    for frame in _read_all(src)[:10]:
+        writer.write(frame)
+    started = tmp_path / "remux.pid"
+    hang = _fake_tool(tmp_path, "hang")
+    hang.write_text(f"#!/bin/sh\necho $$ > {started}\nexec sleep 60\n")
+    writer._ffmpeg = str(hang)                  # the encoder is running already; the remux hangs
+    cancel = threading.Event()
+
+    def cancel_once_remuxing() -> None:
+        deadline = time.monotonic() + 10
+        while not (started.exists() and started.read_text().strip()) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        cancel.set()
+
+    threading.Thread(target=cancel_once_remuxing, daemon=True).start()
+    begun = time.monotonic()
+    with pytest.raises(V.VideoCancelled):
+        writer.close(cancel)
+    assert time.monotonic() - begun < 5
+    with pytest.raises(ProcessLookupError):
+        os.kill(int(started.read_text()), 0)    # killed and reaped, not left running
+    assert not dst.exists() and _leftovers(dst.parent) == []
+
+
+@needs_ffmpeg
+def test_writer_keeps_the_render_when_the_source_is_gone(clip_copy, tmp_path: Path, caplog: pytest.LogCaptureFixture):
+    src = clip_copy("plain")
+    info = V.probe(src)
+    frames = _read_all(src)[:12]
+    dst = src.with_name("orphan.mp4")
+    with V.FrameWriter(dst, info, src) as writer:
+        for frame in frames:
+            writer.write(frame)
+        src.rename(src.with_name("renamed.mp4"))    # moved or trashed while rendering
+    assert not writer.audio_kept and "without sound and metadata" in caplog.text
+    out = V.probe(dst)
+    assert not out.has_audio and abs(out.frames - 12) <= 1 and out.codec == "h264"
+    assert _leftovers(dst.parent) == []
+
+    # even when ffmpeg can't copy it any more, the encoded video is kept as it is
+    src = clip_copy("plain")
+    dst = src.with_name("as-encoded.mp4")
+    failing = _fake_tool(tmp_path, "failing")
+    failing.write_text("#!/bin/sh\nexit 1\n")
+    with V.FrameWriter(dst, info, src) as writer:
+        for frame in frames:
+            writer.write(frame)
+        writer._ffmpeg = str(failing)
+    assert not writer.audio_kept and abs(V.probe(dst).frames - 12) <= 1
+    assert _leftovers(dst.parent) == []
+
+
 # ── render_video with fake models ────────────────────────────────────────
 
 GREEN = (0, 255, 0)
@@ -636,6 +694,25 @@ def test_render_cancel_removes_the_partial_file(clip_copy):
 
 
 @needs_ffmpeg
+def test_render_cancel_while_finishing_the_file_saves_nothing(clip_copy):
+    src = clip_copy("plain")
+    person, face = _identities(2)
+    cancel = threading.Event()
+
+    def progress(event) -> None:
+        if event.stage == "encode":           # every frame is written; the file is being finished
+            cancel.set()
+
+    dst = src.with_name("late.mp4")
+    with pytest.raises(V.VideoCancelled):
+        V.render_video(
+            src, dst, [VideoIdentity(person, face)], RenderOptions(),
+            progress=progress, cancel=cancel, hooks=FakeModels(person).hooks(),
+        )
+    assert not dst.exists() and _leftovers(src.parent) == []
+
+
+@needs_ffmpeg
 def test_render_errors_are_reraised_without_output(clip_copy):
     src = clip_copy("plain")
     person, face = _identities(2)
@@ -691,6 +768,40 @@ def test_enhanced_face_pasted_back_in_its_box_matches_the_full_frame_blend():
         roi = V._enhance_face(frame.copy(), kps, session, size)
         assert np.abs(full.astype(np.int16) - roi.astype(np.int16)).max() <= 2, (x, y, tilt)
         assert np.abs(full.astype(np.int16) - frame.astype(np.int16)).max() > 50     # it did paste something
+
+
+class CloseUpBlindDetector:
+    """Finds `face` (frame pixels) unless it is wider than half the picture it's given, as close-ups defeat SCRFD."""
+
+    def __init__(self, frame: np.ndarray, face) -> None:
+        self.frame, self.face = frame, face
+        self.inputs: list[tuple[int, int]] = []
+
+    def detect(self, image: np.ndarray, max_num: int = 0, metric: str = "default"):
+        self.inputs.append(image.shape[:2])
+        pad = (image.shape[1] - self.frame.shape[1]) // 2
+        inner = image[pad : image.shape[0] - pad, pad : image.shape[1] - pad]
+        assert (inner == self.frame).all() and image.sum() == self.frame.sum()      # a black border, if any
+        if self.face is None or self.face[0][2] - self.face[0][0] > image.shape[1] / 2:
+            return np.zeros((0, 5), np.float32), np.zeros((0, 5, 2), np.float32)
+        bbox, kps = self.face
+        return np.append(bbox + pad, 0.9)[None].astype(np.float32), (kps + pad)[None]
+
+
+def test_detection_finds_close_ups_on_a_frame_with_a_black_border():
+    frame = np.random.default_rng(0).integers(1, 256, (H, W, 3), dtype=np.uint8)
+    pad = int(0.3 * max(H, W))
+    close_up = _face(40, 10, w=220)                            # fills the frame: found only with the border
+    detector = CloseUpBlindDetector(frame, close_up)
+    [(bbox, kps)] = V._detect_faces(detector, frame)
+    assert detector.inputs == [(H, W), (H + 2 * pad, W + 2 * pad)]
+    np.testing.assert_allclose(bbox, close_up[0])              # back in frame pixels
+    np.testing.assert_allclose(kps, close_up[1])
+    # a face found at once costs one detection; a frame with nobody in it, two
+    found = CloseUpBlindDetector(frame, _face(100, 60))
+    assert len(V._detect_faces(found, frame)) == 1 and found.inputs == [(H, W)]
+    nobody = CloseUpBlindDetector(frame, None)
+    assert V._detect_faces(nobody, frame) == [] and len(nobody.inputs) == 2
 
 
 # ── HDR (macOS VideoToolbox) ─────────────────────────────────────────────

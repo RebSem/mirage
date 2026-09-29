@@ -478,3 +478,15 @@ def test_saved_photo_is_marked_as_face_swapped(tmp_path: Path) -> None:
     out = photo_io.save_image(image, src, meta)
     exif = Image.open(out).getexif()
     assert "Mirage" in str(exif.get(0x0131)) and "swapped" in str(exif.get(0x010E))
+
+
+def test_quitting_mid_save_removes_the_hidden_temp_file(tmp_path):
+    src = tmp_path / "a.jpg"
+    stuck = tmp_path / ".a-mirage.abcd.tmp"
+    stuck.write_bytes(b"half a jpeg")
+    photo_io._IN_FLIGHT.add(stuck)
+    try:
+        photo_io.discard_unfinished()
+    finally:
+        photo_io._IN_FLIGHT.discard(stuck)
+    assert not stuck.exists() and not src.exists()

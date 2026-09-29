@@ -132,6 +132,21 @@ def _stop(proc: subprocess.Popen | None, timeout: float = 5.0) -> None:
         log.warning("ffmpeg (pid %s) did not exit after kill", proc.pid)
 
 
+def _wait(proc: subprocess.Popen, cancel: threading.Event, timeout: float) -> int:
+    """proc's exit code. Kills it and raises VideoCancelled once `cancel` is set, TimeoutExpired after `timeout` s."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if cancel.is_set():
+            _stop(proc)
+            raise VideoCancelled()
+        try:
+            return proc.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            if time.monotonic() >= deadline:
+                _stop(proc)
+                raise subprocess.TimeoutExpired(proc.args, timeout) from None
+
+
 def _close_quietly(*pipes) -> None:
     for pipe in pipes:
         if pipe is not None:
@@ -657,24 +672,31 @@ class FrameWriter:
                 raise RuntimeError(f"the video encoder stopped: {self._stderr.text()}") from exc
         self.frames_written += 1
 
-    def close(self) -> Path:
-        """Finish encoding, add the source's audio, move the result to `dst`."""
+    def close(self, cancel: threading.Event | None = None) -> Path:
+        """Finish encoding, add the source's audio, move the result to `dst`.
+
+        Setting `cancel` stops it at any point (ffmpeg killed, temp files removed)
+        with VideoCancelled; a long video can take minutes here.
+        """
         if self._state == "closed":
             return self.dst
         if self._state == "aborted":
             raise RuntimeError("the video writer was aborted")
+        cancel = cancel or threading.Event()
         try:
             with self._io_lock:
                 _close_quietly(self._proc.stdin)
             try:
-                code = self._proc.wait(timeout=600)
+                code = _wait(self._proc, cancel, 600)
             except subprocess.TimeoutExpired:
                 raise RuntimeError("the video encoder did not finish") from None
             self._stderr.join()
             if code != 0 or self.frames_written == 0:
                 raise RuntimeError(f"the video encoder failed: {self._stderr.text()}")
             if self._stream is not None:
-                self._remux()
+                self._remux(cancel)
+            if cancel.is_set():
+                raise VideoCancelled()
             os.replace(self._tmp_final, self.dst)
             self._state = "closed"
         except BaseException:
@@ -697,13 +719,11 @@ class FrameWriter:
         for path in (self._tmp_video, self._tmp_final):
             path.unlink(missing_ok=True)
 
-    def _remux(self) -> None:
+    def _remux(self, cancel: threading.Event) -> None:
         stream = self._stream
         assert stream is not None
-        base = [
-            self._ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
-            "-i", str(self._tmp_video), "-i", stream.info.path, "-map", "0:v:0",
-        ]
+        head = [self._ffmpeg, "-hide_banner", "-nostdin", "-loglevel", "error", "-y", "-i", str(self._tmp_video)]
+        base = head + ["-i", stream.info.path, "-map", "0:v:0"]
         tail = ["-c:v", "copy", "-map_metadata", "1", "-movflags", "+faststart", "-f", "mp4", str(self._tmp_final)]
         attempts: list[list[str]] = []
         if stream.audio_index is not None:
@@ -711,18 +731,40 @@ class FrameWriter:
             if stream.audio_codec in _MP4_AUDIO:
                 attempts.append(audio + ["-c:a", "copy"])
             attempts.append(audio + ["-c:a", "aac", "-b:a", "192k"])
-        attempts.append([])            # last resort: keep the rendered video even without its audio
+        attempts.append([])            # keep the rendered video even without its audio
         error = ""
         for extra in attempts:
-            result = subprocess.run(base + extra + tail, capture_output=True, timeout=3600)
-            if result.returncode == 0:
+            code, detail = self._run(base + extra + tail, cancel)
+            if code == 0:
                 self.audio_kept = bool(extra)
                 if stream.audio_index is not None and not extra:
                     log.warning("saved without audio, it could not be carried over: %s", error)
                 return
-            error = result.stderr.decode("utf-8", "replace").strip()[-300:]
+            error = detail
             log.info("remux attempt failed: %s", error)
-        raise RuntimeError(f"could not finish the video file: {error}")
+        # Every attempt reads the source: renamed, moved or trashed during the render, it's
+        # gone now. Keep the render without it (as encoded, if even a copy fails).
+        log.warning("saved without sound and metadata, the original could not be read: %s", error)
+        self.audio_kept = False
+        code, detail = self._run(head + ["-map", "0:v:0", "-c", "copy", "-movflags", "+faststart", "-f", "mp4",
+                                         str(self._tmp_final)], cancel)
+        if code != 0:
+            log.info("copying the video alone failed, keeping it as encoded: %s", detail)
+            os.replace(self._tmp_video, self._tmp_final)
+
+    def _run(self, cmd: list[str], cancel: threading.Event) -> tuple[int, str]:
+        """One remux step: ffmpeg's exit code and last words. Not started or killed on cancel (VideoCancelled)."""
+        if cancel.is_set():
+            raise VideoCancelled()
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        stderr = _StderrTail(proc.stderr)
+        try:
+            code = _wait(proc, cancel, 3600)
+        finally:
+            _stop(proc)
+            stderr.join()
+            _close_quietly(proc.stderr)
+        return code, stderr.text()
 
 
 def output_path(src: str | os.PathLike) -> Path:
@@ -971,6 +1013,7 @@ class _Source:
 
 
 VIDEO_DET_SIZE = 640
+_CLOSE_UP_PAD = 0.3            # black border around a frame without faces, as a share of its longer side
 _DETECTOR = None
 _DETECTOR_LOCK = threading.Lock()
 
@@ -1018,6 +1061,24 @@ def _move_detector_to_gpu(detector, path: str) -> None:
     except Exception as exc:
         log.warning("video face detector stays on the CPU: %s", exc)
         detector.session = cpu_session
+
+
+def _detect_faces(detector, frame: np.ndarray) -> list[Detection]:
+    """Every face in a frame, close-ups included.
+
+    A face filling the frame defeats the detector; a black border makes it
+    smaller relative to the input, as when the video was opened
+    (analyze.detect_faces). Only frames without a face pay for the second pass.
+    """
+    bboxes, kpss = detector.detect(frame, max_num=0, metric="default")
+    pad = 0
+    if bboxes.shape[0] == 0:
+        pad = int(_CLOSE_UP_PAD * max(frame.shape[:2]))
+        padded = cv2.copyMakeBorder(frame, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+        bboxes, kpss = detector.detect(padded, max_num=0, metric="default")
+    if kpss is None:
+        return []
+    return [(bboxes[i, :4] - pad, kpss[i] - pad) for i in range(bboxes.shape[0])]
 
 
 @functools.lru_cache(maxsize=4)
@@ -1099,10 +1160,7 @@ def default_hooks(options: RenderOptions | None = None) -> VideoHooks:
         raise RuntimeError("the face swap model could not be loaded")
 
     def detect(frame: np.ndarray) -> list[Detection]:
-        bboxes, kpss = detector.detect(frame, max_num=0, metric="default")
-        if kpss is None:
-            return []
-        return [(bboxes[i, :4], kpss[i]) for i in range(bboxes.shape[0])]
+        return _detect_faces(detector, frame)
 
     def embed(frame: np.ndarray, bbox: np.ndarray, kps: np.ndarray) -> np.ndarray:
         return np.asarray(recognizer.get(frame, Face(bbox=bbox, kps=kps)), dtype=np.float32)
@@ -1355,7 +1413,7 @@ def render_video(
             raise RuntimeError(f"no frames could be decoded from {src.name}")
         reporter.total = done
         reporter.send("encode", done)
-        result = writer.close()
+        result = writer.close(cancel)
         reporter.send("done", done, reporter.average_fps(done), 0.0)
         return result
     except BaseException:

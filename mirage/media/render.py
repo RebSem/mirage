@@ -83,8 +83,11 @@ class PhotoRenderer:
             swapped = []
             for target in targets:
                 source_id = plan.get(target.index)
-                if not source_id or source_id not in embeddings:
+                if not source_id:
                     continue
+                if source_id not in embeddings:
+                    # never save an unchanged copy as if it were swapped
+                    raise LookupError(f"the face chosen for face {target.index} is no longer in the library")
                 face = Face(bbox=np.asarray(target.bbox, dtype=np.float32), kps=target.kps.astype(np.float32),
                             det_score=target.score)
                 if G.mouth_mask:
