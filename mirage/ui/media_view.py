@@ -167,11 +167,13 @@ class MediaView(QWidget):
     def _face_at(self, pos: QPointF) -> int | None:
         if self.mode != "image" or self.busy_text:
             return None
-        for rect, index in self._chip_hits:      # a face's chip belongs to that face
+        hits = [t for t in self.targets if self._face_rect(t).contains(pos)]
+        if hits:
+            return min(hits, key=lambda t: t.area).index
+        for rect, index in self._chip_hits:      # off every face, a chip still belongs to its face
             if rect.contains(pos):
                 return index
-        hits = [t for t in self.targets if self._face_rect(t).contains(pos)]
-        return min(hits, key=lambda t: t.area).index if hits else None
+        return None
 
     # ── input ────────────────────────────────────────────────────────────
 
@@ -347,35 +349,41 @@ class MediaView(QWidget):
                 p.drawPolyline([QPointF(cx, cy + dy * arm), QPointF(cx, cy), QPointF(cx + dx * arm, cy)])
 
     def _layout_chips(self, reserved: list[QRectF]) -> list[tuple[TargetFace, QRectF]]:
-        """Chips centred under their face, inside the photo, never on top of each other."""
+        """Chips centred under their face, inside the photo, never on each other or on a letter;
+        other faces are avoided when possible. A chip with nowhere to go is left out (the outline
+        still shows the face is being swapped)."""
         bounds = self._image_rect().adjusted(8, 8, -8, -8)
         placed = list(reserved)
         out = []
         faces = sorted(self.targets, key=lambda t: (self._face_rect(t).bottom(), self._face_rect(t).left()))
+        rects = {t.index: self._face_rect(t) for t in self.targets}
         for t in faces:
             label = self.labels.get(t.index)
             assigned = bool(label and label.assigned)
             if label is None or not (assigned or t.index in (self._hover, self.active)):
                 continue
-            fr = self._face_rect(t)
+            fr = rects[t.index]
             if assigned:
                 w = chip_width(label.text, avatar=label.avatar is not None, strong=True)
             else:
                 w = chip_width(tr("media_choose_face"))
             x = max(bounds.left(), min(fr.center().x() - w / 2, bounds.right() - w))
-            candidates = [fr.bottom() + 8, fr.bottom() - CHIP_H - 8, fr.top() - CHIP_H - 8]
+            others = [r for i, r in rects.items() if i != t.index]
+            ys = [fr.bottom() + 8, fr.bottom() - CHIP_H - 8, fr.top() - CHIP_H - 8]
             chosen = None
-            for y in candidates:
-                rect = QRectF(x, y, w, CHIP_H)
-                if bounds.contains(rect) and not any(rect.intersects(o.adjusted(-4, -4, 4, 4)) for o in placed):
-                    chosen = rect
+            for avoid_faces in (True, False):
+                for y in ys:
+                    rect = QRectF(x, y, w, CHIP_H)
+                    if not bounds.contains(rect):
+                        continue
+                    blockers = placed + (others if avoid_faces else [])
+                    if not any(rect.intersects(o.adjusted(-4, -4, 4, 4)) for o in blockers):
+                        chosen = rect
+                        break
+                if chosen is not None:
                     break
-            if chosen is None:  # crowded: inside the bottom of the outline, nudged down past any overlap
-                y = max(bounds.top(), min(fr.bottom() - CHIP_H - 8, bounds.bottom() - CHIP_H))
-                chosen = QRectF(x, y, w, CHIP_H)
-                for o in placed:
-                    if chosen.intersects(o):
-                        chosen.moveTop(min(o.bottom() + 4, bounds.bottom() - CHIP_H))
+            if chosen is None:
+                continue
             placed.append(chosen)
             out.append((t, chosen))
         return out
