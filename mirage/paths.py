@@ -45,6 +45,16 @@ def logs_dir() -> Path:
     return _ensure(app_support_dir() / "logs")
 
 
+def cache_dir() -> Path:
+    """Things Mirage can always rebuild (compiled CoreML models); macOS may clear it."""
+    override = _home_override()
+    if override is not None:
+        return _ensure(override / "cache")
+    if sys.platform == "darwin":
+        return _ensure(Path.home() / "Library" / "Caches" / "Mirage")
+    return _ensure(Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "mirage")
+
+
 def repo_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
