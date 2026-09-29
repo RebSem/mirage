@@ -130,7 +130,7 @@ _on_analyzed, _on_rendered, …  ◄── Qt signals, queued: (token, result or
 | `paths.py` | all filesystem locations (see below) |
 | `settings.py` | persisted user settings (JSON) |
 | `library.py` | face library: import photos, thumbnails, cached embeddings |
-| `upstream.py` | configures the Deep-Live-Cam engine once (CoreML, 320 px live detector) |
+| `upstream.py` | configures the Deep-Live-Cam engine once (CoreML, 320 px live detector, compiled-model cache) |
 | `faces_ai.py` | photo → `DetectedFace` (embedding, box, gender, age) with its own 640 px detector; random faces |
 | `camera.py` | camera discovery (AVFoundation order, uid → OpenCV index), OBS camera check |
 | `engine.py` | `LiveEngine`: capture, detect and process threads, virtual camera |
@@ -160,6 +160,7 @@ All locations can be redirected with the `MIRAGE_HOME` environment variable
 | `faces_dir()` | `<app_support>/faces` |
 | `settings_path()` | `<app_support>/settings.json` |
 | `logs_dir()` | `~/Library/Logs/Mirage` (or `<MIRAGE_HOME>/logs`) |
+| `cache_dir()` | `~/Library/Caches/Mirage` (or `<MIRAGE_HOME>/cache`): compiled CoreML models |
 | `repo_root()` | the checkout (parent of `mirage/`) |
 | `models_dir()` | `<repo_root>/models` |
 
@@ -275,6 +276,19 @@ detector size and providers at that point and the analyser is cached. The
 engine's model loading and `faces_ai.embed` both call it first. Faces on a
 webcam are big, so 320 px is enough: about 9 ms per detection on M1 instead
 of about 26 ms at 640.
+
+It also makes model loading cheap after the first launch. ONNX Runtime's
+CoreML provider compiles each model on every session start (about 5 s for
+the swap model) while holding Python's lock, so the window stalls meanwhile.
+`configure_upstream()` wraps `onnxruntime.InferenceSession.__init__` so every
+CoreML session gets a `ModelCacheDirectory` under `cache_dir()/coreml`, one
+folder per model file version (`coreml_cache_for()`: name, size and mtime,
+because the runtime keys its cache by path only); older versions are
+removed, and a cache that fails to load is deleted and the model compiled
+again. It also makes insightface's `model_zoo.get_model` return nothing for
+files `FaceAnalysis` would only open to drop (`UNUSED_FACE_MODELS`: the 3D
+landmark model and the engine's CoreML rewrites of the detector). Warm-up on
+an M1 Air: 15–19 s before, 5–7 s with a warm cache.
 
 ### `faces_ai.py`
 

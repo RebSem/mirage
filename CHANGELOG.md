@@ -20,6 +20,9 @@ Deep-Live-Cam `main` as of September 2026 (commit `759e3f9`).
   three-way merge and records the new base commit.
 - `make install-app` also puts a `Mirage.app` shortcut in the project folder,
   next to the code, so Mirage opens from there too (git ignores it).
+- Compiled models are kept in `~/Library/Caches/Mirage` between launches:
+  getting ready takes about 5–7 s instead of 15–19 s on a MacBook Air M1, and
+  the window no longer stalls while models load. A damaged cache is rebuilt.
 
 ### Changed
 
@@ -95,6 +98,13 @@ Deep-Live-Cam `main` as of September 2026 (commit `759e3f9`).
 
 ### Fixed
 
+- Quitting in the middle of a batch of photos could take 10 seconds, so it
+  looked as if Mirage wouldn't close. It now quits at once (well under a
+  second), while still never leaving a half-written file; quitting during a
+  call or a video render stops the camera and ffmpeg and deletes the
+  unfinished video, as before.
+- A plain click on the title bar logged "Window move completed without
+  beginning".
 - Opening a folder of photos right after saving a single photo showed a
   folder button that pointed at the old photo.
 - Batch thumbnails were squeezed; they are now centre-cropped.

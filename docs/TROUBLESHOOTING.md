@@ -223,13 +223,20 @@ same size, the one nearer the centre). To change that:
 
 ### The first photo takes a while
 
-The first time you open a photo, finding faces takes about 10 seconds while
-the models load, and the first **Swap** another 4–7 seconds while the face
-enhancer (GFPGAN) loads. The very first time, the enhancer is also
-downloaded (about 370 MB). After that, finding faces takes well under a
-second, and swapping about half a second per face on a MacBook Air M1.
+The very first time, each model is compiled for the Neural Engine or GPU
+(10–20 seconds in all) and the photo face enhancer (GFPGAN, about 370 MB) is
+downloaded. The compiled models are kept in `~/Library/Caches/Mirage`, so
+from then on the models load in a few seconds, the first **Swap** takes 2–4
+seconds, and each face after that about half a second on a MacBook Air M1.
 Switching back to **Live** frees the enhancer's memory, so the next swap
-after that loads it again.
+after that loads it again (from the cache, quickly).
+
+### Mirage takes long to start again, or the cache is big
+
+`~/Library/Caches/Mirage` holds the compiled models (about 1–2 GB). It is
+safe to delete at any time, and macOS may clear it when the disk is full;
+Mirage then compiles the models once more on the next start, which takes
+10–20 seconds. A damaged cache is detected and rebuilt on its own.
 
 ### Making a video is slow, or the Mac gets warm
 
@@ -358,7 +365,8 @@ rm -rf ~/Library/Application\ Support/Mirage
 
 1. Quit Mirage and delete `~/Applications/Mirage.app` (if you installed it).
 2. Delete the `mirage` folder you cloned (it holds the venv and the models).
-3. Delete `~/Library/Application Support/Mirage` and `~/Library/Logs/Mirage`.
+3. Delete `~/Library/Application Support/Mirage`, `~/Library/Caches/Mirage`
+   and `~/Library/Logs/Mirage`.
 4. Delete `~/.insightface/models/buffalo_l` (the face detection models).
 5. Optionally, uninstall OBS, and ffmpeg too (`brew uninstall ffmpeg`) if
    nothing else of yours needs it, and turn Mirage off under
