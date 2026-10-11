@@ -35,3 +35,21 @@ build/
 # Tracked images despite the "*.png" rule above (Mirage.icns is tracked too)
 !assets/**/*.png
 !docs/images/*.png
+
+# macOS Finder metadata
+.DS_Store
+
+# Test, lint and type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local env files (none are needed today; keep an example if one is added)
+.env
+.env.*
+!.env.example
+
+# Editor swap files
+*.swp

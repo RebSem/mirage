@@ -29,6 +29,9 @@ It is a native-looking macOS app (Liquid Glass, English and Russian) built on
 the open-source [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam)
 engine by hacksider and contributors.
 
+**Status:** latest release 0.2.0 (September 2026); `main` has newer, not yet released
+changes, listed in the [changelog](CHANGELOG.md). A spare-time project.
+
 > [!IMPORTANT]
 > Only use someone's face if they're fine with it, and tell people it's a
 > joke. The face models are licensed for non-commercial use only, so Mirage is
@@ -140,6 +143,7 @@ face from thispersondoesnotexist.com.
 - [Architecture](docs/ARCHITECTURE.md) and [design](docs/DESIGN.md) notes
 - [The engine](third_party/deep-live-cam/README.md): where Deep-Live-Cam comes from, what Mirage changed, how to update it; its classic window runs with `make classic`
 - [Contributing](CONTRIBUTING.md), [changelog](CHANGELOG.md), [notice and third-party licenses](NOTICE.md)
+- [AGENTS.md](AGENTS.md): a dense guide to the repository for contributors and coding agents (which code is Mirage's and which is Deep-Live-Cam's, commands, rules, syncing with upstream)
 
 ## Credits and license
 
