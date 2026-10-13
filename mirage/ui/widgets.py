@@ -142,7 +142,7 @@ class ControlBar(GlassPanel):
 # ── icons ────────────────────────────────────────────────────────────────
 
 def draw_icon(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
-    """Tiny vector icon set (play, stop, plus, dice, mirror, person, camera, help)."""
+    """Tiny vector icon set (play, stop, plus, dice, mirror, person, camera, background, none, help, …)."""
     p.save()
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     s = min(rect.width(), rect.height())
@@ -284,6 +284,32 @@ def draw_icon(p: QPainter, name: str, rect: QRectF, color: QColor) -> None:
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(color)
         p.drawPath(half)
+    elif name == "background":
+        # a picture frame with a person standing in front of it (the frame passes behind)
+        person = QPainterPath()
+        person.addEllipse(QPointF(c.x(), c.y() - s * 0.02), s * 0.085, s * 0.085)
+        person.addRoundedRect(QRectF(c.x() - s * 0.17, c.y() + s * 0.15, s * 0.34, s * 0.26), s * 0.12, s * 0.12)
+        gap = QPainterPath()
+        gap.addEllipse(QPointF(c.x(), c.y() - s * 0.02), s * 0.14, s * 0.14)
+        gap.addRoundedRect(QRectF(c.x() - s * 0.23, c.y() + s * 0.10, s * 0.46, s * 0.40), s * 0.16, s * 0.16)
+        outside = QPainterPath()
+        outside.addRect(rect.adjusted(-s, -s, s, s))
+        p.save()
+        p.setClipPath(outside.subtracted(gap))
+        p.setPen(QPen(color, max(1.4, s * 0.075)))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(c.x() - s * 0.40, c.y() - s * 0.32, s * 0.80, s * 0.58), s * 0.08, s * 0.08)
+        p.restore()
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(color)
+        p.drawPath(person)
+    elif name == "none":
+        p.setPen(QPen(color, max(1.5, s * 0.08), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        r = s * 0.32
+        p.drawEllipse(c, r, r)
+        d = r * 0.7071
+        p.drawLine(QPointF(c.x() - d, c.y() + d), QPointF(c.x() + d, c.y() - d))
     elif name == "help":
         p.setPen(color)
         p.setFont(theme.font(max(9.0, s * 0.95), theme.QFont.Weight.Bold))

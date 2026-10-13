@@ -30,6 +30,8 @@ def test_defaults_match_contract() -> None:
         "me_face_id": None,
         "photo_enhance": True,
         "video_enhance": False,
+        "background": "none",
+        "hair_swap": False,
     }
 
 
@@ -203,3 +205,15 @@ def test_read_only_directory_does_not_raise(
         assert not (folder / "settings.json").exists()
     finally:
         folder.chmod(0o700)
+
+
+def test_background_is_validated(tmp_path: Path) -> None:
+    path = tmp_path / "settings.json"
+    for good in ("none", "blur", "preset:aurora", "image:0123456789ab"):
+        path.write_text(f'{{"background": "{good}", "hair_swap": true}}', encoding="utf-8")
+        loaded = settings.load(path)
+        assert loaded.background == good and loaded.hair_swap is True
+    for bad in ('"preset:disco"', '"image:../../etc"', '"image:"', '"sepia"', "7", "null"):
+        path.write_text(f'{{"background": {bad}, "hair_swap": "yes"}}', encoding="utf-8")
+        loaded = settings.load(path)
+        assert loaded.background == "none" and loaded.hair_swap is False

@@ -7,6 +7,8 @@ Files that go here:
   GPEN-BFR-256.onnx         face enhancement for Best and videos
                             (or ahead of time: scripts/install.sh --with-enhancer)
   gfpgan-1024.onnx          face enhancement for photos, and in the classic window
+  face_parsing_resnet18.onnx  finds hair, skin and face for "Their hairstyle" (make install;
+                            BiSeNet from github.com/yakhyo/face-parsing, MIT, 53 MB)
 Mirage also writes CoreML-optimised copies next to them (*_coreml*.onnx).
 
 The face detection models (buffalo_l) go to ~/.insightface/models instead.
@@ -14,6 +16,8 @@ The face detection models (buffalo_l) go to ~/.insightface/models instead.
 To download the main files by hand, put them here:
 https://huggingface.co/hacksider/deep-live-cam/resolve/main/inswapper_128_fp16.onnx?download=true
 https://huggingface.co/hacksider/deep-live-cam/resolve/main/gfpgan-1024.onnx?download=true
+https://github.com/yakhyo/face-parsing/releases/download/v0.0.1/resnet18.onnx
+  (save it as face_parsing_resnet18.onnx; Mirage checks its SHA-256)
 
 The engine in third_party/deep-live-cam finds this folder through its
 `models` link. The models are not covered by Mirage's AGPL license and are for

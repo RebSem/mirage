@@ -49,6 +49,8 @@ class Settings:
     me_face_id: str | None = None  # library face marked "This is me" (found first in photos)
     photo_enhance: bool = True  # GFPGAN on swapped faces in photos
     video_enhance: bool = False  # GPEN-256 in videos (slow on M1)
+    background: str = "none"  # "none" | "blur" | "preset:<name>" | "image:<id>" (mirage/backgrounds.py)
+    hair_swap: bool = False  # wear the hairstyle from the face's photo (live)
 
 
 _DEFAULTS = Settings()
@@ -72,6 +74,10 @@ def _coerce(name: str, value: Any) -> Any:
             return default
         choice = value.strip().lower()
         return choice if choice in _CHOICES[name] else default
+    if name == "background":
+        from mirage.backgrounds import is_valid
+
+        return value if isinstance(value, str) and is_valid(value) else default
     if default is None:  # optional string: camera uid, face id, geometry
         return value if isinstance(value, str) and value else None
     return value if isinstance(value, str) else default
