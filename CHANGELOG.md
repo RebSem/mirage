@@ -11,7 +11,49 @@ Deep-Live-Cam `main` as of September 2026 (commit `759e3f9`).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-13
+
+Virtual backgrounds and *Their hairstyle* for calls, plus everything below
+that piled up on `main` since 0.2.0. To update: `git pull`, then
+`make install` (it adds one package, Apple Vision's Python bindings, and the
+53 MB hairstyle model).
+
 ### Added
+
+- **Virtual backgrounds** in Live. A round button next to the mirror (`B`
+  turns it on and off) opens a panel above the control bar with previews:
+  *None*, *Blur* (your room, softly blurred), six built-in backgrounds drawn
+  in code (*Studio*, *Office*, *Aurora*, *Sunset*, *Lagoon*, *Daylight*)
+  and your own pictures. Drop pictures on the panel or use **Add…** (HEIC
+  works); right-click one of yours to show it in Finder or remove it. The
+  choice is remembered; the button shows a tiny preview while a background is
+  on, and the idle stage shows it faintly before you go live. Also under
+  *Live → Background* and *File → Add Background Picture…*.
+  - You are cut out with Apple's Vision person segmentation (built into
+    macOS, runs on the Neural Engine alongside the swap); the mask is
+    cleaned of faint noise and stray blobs, snapped to the picture with a
+    guided filter and steadied between frames.
+  - The edge is decontaminated: the old wall's colour is taken out of hair
+    and shoulders, so a green wall doesn't leave a green rim on a beach.
+  - *Blur* takes you out before blurring, so there is no halo around you.
+  - Until the first mask is ready, the whole picture is blurred rather than
+    showing your room.
+  - Cost on a MacBook Air M1: about 15 → 11 fps (*Fast* uses Vision's fast
+    mode).
+- **Their hairstyle** (*Причёска с фото*), a switch under *Look*: wear the
+  hair from the selected face's photo instead of your own.
+  - The hair is cut out of the photo once per face with a BiSeNet
+    face-parsing model ([yakhyo/face-parsing](https://github.com/yakhyo/face-parsing),
+    MIT, 53 MB, downloaded by `make install` or on first use and checked
+    against its SHA-256) and cached in `~/Library/Caches/Mirage/hair`.
+  - Live, it follows your face, widens or narrows to fit it, and matches the
+    room's light. A few times a second the same model finds *your* hair (on
+    the CPU, so the Neural Engine stays with the swap): where it sticks out
+    beyond the new hairstyle it becomes the background (or what is behind
+    you, without a virtual background), and above the eyebrows it becomes
+    skin painted from your own.
+  - A photo without hair gives you a shaved look, and Mirage says so.
+  - About 9–10 fps together with a background on an M1.
 
 - [`third_party/deep-live-cam/README.md`](third_party/deep-live-cam/README.md):
   which upstream commit the engine is based on, every change Mirage made to
@@ -26,6 +68,9 @@ Deep-Live-Cam `main` as of September 2026 (commit `759e3f9`).
 
 ### Changed
 
+- The idle hint lists `B` for the background.
+- CI is green again: the CoreML cache test that needs onnxruntime is skipped
+  where only the light test dependencies are installed.
 - The Deep-Live-Cam engine moved from the top of the repository (`modules/`,
   `locales/`, `run.py`, …) into `third_party/deep-live-cam/`, so the
   repository is laid out as Mirage's own, with the engine in a clearly
@@ -325,6 +370,7 @@ to both Mirage and the classic UI.
   without anyone noticing. Downloads now verify certificates, using
   certifi's CA bundle.
 
-[Unreleased]: https://github.com/RebSem/mirage/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/RebSem/mirage/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/RebSem/mirage/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/RebSem/mirage/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/RebSem/mirage/releases/tag/v0.1.0

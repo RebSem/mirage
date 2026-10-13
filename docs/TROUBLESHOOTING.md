@@ -14,6 +14,7 @@ attached is the fastest way to get help.
 - [“Looking for your face…” while live](#looking-for-your-face-while-live)
 - [The wrong camera is used](#the-wrong-camera-is-used)
 - [Face names reset to “Face”](#face-names-reset-to-face)
+- [Backgrounds and the hairstyle](#backgrounds-and-the-hairstyle)
 - [Photos & videos](#photos--videos): [ffmpeg](#videos-need-ffmpeg),
   [no faces found](#no-faces-found-here),
   [the wrong person swapped](#the-wrong-person-got-swapped),
@@ -168,6 +169,57 @@ from it.
 
 If the saved data of a single face is damaged, Mirage shows your real face
 instead and tells you; remove that face and add its photo again.
+
+## Backgrounds and the hairstyle
+
+### “Backgrounds and hairstyles need an update”
+
+Mirage was updated with `git pull` but the new package isn't installed yet.
+Quit Mirage and run, in the Mirage folder:
+
+```bash
+make install
+```
+
+### Bits of the room show around me, or my edges flicker
+
+Mirage cuts you out with Apple's person segmentation, which likes:
+
+- **light on you**, more than on the wall behind you (a bright window behind
+  you makes the edge unsure);
+- **a background that differs from you**: a dark jumper against a dark
+  sofa is hard for anyone;
+- **being in frame**: head and shoulders, not just a face filling the
+  picture.
+
+*Fast* uses Vision's quicker, rougher mode; *Balanced* and *Best* use the
+more careful one.
+
+### Fewer fps with a background
+
+Cutting you out shares the Neural Engine with the face swap: on a MacBook
+Air M1 a call goes from about 15 to about 11 fps with a background, and to
+about 9–10 with the hairstyle too. *Fast* helps, as do the tips in
+[Low fps](#low-fps-choppy-video).
+
+### The hairstyle doesn't look right
+
+- **It works best when the new hair is at least as full as yours.** Hair
+  that is shorter than yours means Mirage has to hide yours: above the
+  eyebrows it paints skin, at the sides it shows what is behind you. Turn on
+  a background: then "behind you" is the background, which looks cleanest.
+- **Use a photo where the hair is visible**: not cut off by the top of the
+  picture, not hidden under a hood. A hat counts as hair.
+- **Face the camera.** The hairstyle is a flat cut-out that follows your
+  face; turned far to one side, it can't turn with you.
+- *“There's no hair in the photo of …”*: the photo shows no hair (a shaved
+  head, or the hair is cropped away), so yours is hidden too.
+- *“Couldn't get the hairstyle ready”*: the 53 MB hairstyle model didn't
+  download. Check the connection and turn the switch off and on, or run
+  `make install`.
+
+The hairstyle is cached per face in `~/Library/Caches/Mirage/hair`; deleting
+that folder makes Mirage cut it out of the photos again.
 
 ## Photos & videos
 
@@ -365,8 +417,8 @@ rm -rf ~/Library/Application\ Support/Mirage
 
 1. Quit Mirage and delete `~/Applications/Mirage.app` (if you installed it).
 2. Delete the `mirage` folder you cloned (it holds the venv and the models).
-3. Delete `~/Library/Application Support/Mirage`, `~/Library/Caches/Mirage`
-   and `~/Library/Logs/Mirage`.
+3. Delete `~/Library/Application Support/Mirage` (faces, background
+   pictures, settings), `~/Library/Caches/Mirage` and `~/Library/Logs/Mirage`.
 4. Delete `~/.insightface/models/buffalo_l` (the face detection models).
 5. Optionally, uninstall OBS, and ffmpeg too (`brew uninstall ffmpeg`) if
    nothing else of yours needs it, and turn Mirage off under
