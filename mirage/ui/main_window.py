@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 import mirage
+from mirage import backgrounds
 from mirage import camera as cameras
 from mirage import engine as eng
 from mirage import paths, theme
@@ -35,6 +36,7 @@ from mirage.glass import GlassWindow
 from mirage.i18n import tr
 from mirage.library import FaceLibrary, NoFaceError, UnreadableImageError
 from mirage.settings import Settings
+from mirage.ui import backgrounds as bgui
 from mirage.ui.faces import ADD, ME, RANDOM, FaceGrid
 from mirage.ui.look import LookPanel
 from mirage.ui.media_page import MediaPage
@@ -151,6 +153,9 @@ class MainWindow(QWidget):
     closing = Signal()              # the app is about to quit (see app.cleanup)
     importDone = Signal(object)     # list of (kind, payload)
     randomDone = Signal(object)     # (entry | None, error | None)
+    bgLoaded = Signal(object)       # (token, choice, BGR image | None)
+    bgImported = Signal(object)     # list of (kind, entry or file name)
+    hairReady = Signal(object)      # (token, face id, HairTemplate | None, note | None)
 
     def __init__(self, engine: eng.LiveEngine, library: FaceLibrary, settings: Settings, save_settings,
                  demo_photo: str | None = None):
@@ -171,6 +176,12 @@ class MainWindow(QWidget):
         self._vcam_installed = cameras.virtual_camera_installed()
         self._live_since: float | None = None
         self._vcam_warned = False
+        self.bg_library = backgrounds.BackgroundLibrary()
+        self._bg_token = 0
+        self._bg_last = settings.background if settings.background != backgrounds.NONE else backgrounds.BLUR
+        self._bg_thumbs: dict[str, QPixmap] = {}
+        self._hair_token = 0
+        self._hair_key: str | None = None   # the face whose hairstyle is worn (or being prepared)
         self._save_timer = QTimer(self)
         self._save_timer.setSingleShot(True)
         self._save_timer.setInterval(500)
@@ -196,12 +207,16 @@ class MainWindow(QWidget):
         self._wire_engine()
         self.importDone.connect(self._on_import_done)
         self.randomDone.connect(self._on_random_done)
+        self.bgLoaded.connect(self._on_bg_loaded)
+        self.bgImported.connect(self._on_bg_imported)
+        self.hairReady.connect(self._on_hair_ready)
 
         self._refresh_cameras()
         self._reload_faces()
         self._select_face(settings.face_id, announce=False)
         self.media.selected_id = self.settings.face_id   # checked against the library just now
         self.engine.apply(settings)
+        self._apply_background(settings.background)
         self._on_state(self.engine.state)
         self._refresh_vcam_hint()
         if settings.mode == MEDIA:
@@ -285,8 +300,11 @@ class MainWindow(QWidget):
         self.mirror_btn.setCheckable(True)
         self.mirror_btn.setChecked(self.settings.mirror_preview)
         self.mirror_btn.toggled.connect(lambda on: self._set("mirror_preview", on))
+        self.bg_btn = bgui.BackgroundButton(36)
+        self.bg_btn.clicked.connect(self._toggle_bg_picker)
         self.bar.left.addWidget(cam_icon)
         self.bar.left.addWidget(self.camera_combo)
+        self.bar.right.addWidget(self.bg_btn)
         self.bar.right.addWidget(self.mirror_btn)
         self.bar.set_center(self.primary)
         left.addWidget(self.bar)
@@ -343,6 +361,12 @@ class MainWindow(QWidget):
             panel.native_glass = self.glass.native
             self.glass.add(panel, panel.radius)
 
+        self.bg_picker = bgui.BackgroundPicker(self)
+        self.bg_picker.picked.connect(self._on_bg_picked)
+        self.bg_picker.menuRequested.connect(self._bg_menu)
+        self.bg_picker.filesDropped.connect(self._import_backgrounds)
+        self.bg_picker.visibilityChanged.connect(self.bg_btn.set_open)
+
         self.toasts = ToastHost(self, self.pages)
 
     def _build_menu(self) -> None:
@@ -350,6 +374,7 @@ class MainWindow(QWidget):
         file_menu = bar.addMenu(tr("menu_file"))
         self._action(file_menu, tr("menu_add_photos"), "Ctrl+O", self.add_photos)
         self._action(file_menu, tr("menu_random_face"), "Ctrl+R", self.random_face)
+        self._action(file_menu, tr("menu_add_background"), None, self.add_backgrounds)
         file_menu.addSeparator()
         self._action(file_menu, tr("menu_open_media"), "Ctrl+Shift+O", self.open_media)
         self._action(file_menu, tr("media_save"), "Ctrl+S",
@@ -357,6 +382,10 @@ class MainWindow(QWidget):
         live_menu = bar.addMenu(tr("menu_live"))
         self._action(live_menu, tr("menu_start_stop"), None, self.toggle_live)
         self._action(live_menu, tr("menu_mirror"), "Ctrl+Shift+M", lambda: self.mirror_btn.toggle())
+        live_menu.addSeparator()
+        self._action(live_menu, tr("menu_background_toggle"), "B", self.toggle_background)
+        self._bg_menu_bar = live_menu.addMenu(tr("menu_background"))
+        self._bg_menu_bar.aboutToShow.connect(self._fill_bg_menu)
         faces_menu = bar.addMenu(tr("menu_faces"))
         self._action(faces_menu, tr("menu_me"), None, lambda: self._on_tile(ME))
         help_menu = bar.addMenu(tr("menu_help"))
@@ -576,6 +605,7 @@ class MainWindow(QWidget):
         self.grid.set_selected(face_id)
         if face_id != self.settings.face_id:
             self._set("face_id", face_id)
+        self._refresh_hair()
         self.stage.update()
 
     def _face_menu(self, face_id: str, pos: QPointF) -> None:
@@ -636,6 +666,9 @@ class MainWindow(QWidget):
             return
         self.library.remove(face_id)
         self.media.on_face_removed(face_id)
+        from mirage import hair
+
+        hair.forget(face_id)
         if self.settings.me_face_id == face_id:
             self._set("me_face_id", None)
         if self.settings.face_id == face_id:
@@ -722,6 +755,243 @@ class MainWindow(QWidget):
         else:
             self._on_tile(entry.id)
 
+    # ── background ───────────────────────────────────────────────────────
+
+    def _thumb(self, choice: str) -> QPixmap | None:
+        """A small preview for a background choice (cached)."""
+        if choice in self._bg_thumbs:
+            return self._bg_thumbs[choice]
+        kind, value = backgrounds.parse(choice)
+        pix = None
+        try:
+            if kind == backgrounds.BLUR:
+                pix = bgui.blur_thumbnail()
+            elif kind == "preset":
+                pix = bgui.to_pixmap(backgrounds.render_preset(value, *bgui.THUMB))
+            elif kind == "image":
+                image = self.bg_library.load(value)
+                pix = bgui.thumbnail(image) if image is not None else None
+        except Exception:
+            log.exception("could not make a preview of %s", choice)
+        if pix is not None:
+            self._bg_thumbs[choice] = pix
+        return pix
+
+    def _bg_choices(self) -> list[bgui.Choice]:
+        choices = [bgui.Choice(backgrounds.NONE, tr("bg_none")),
+                   bgui.Choice(backgrounds.BLUR, tr("bg_blur"), self._thumb(backgrounds.BLUR))]
+        for name in backgrounds.PRESET_NAMES:
+            value = backgrounds.PRESET_PREFIX + name
+            choices.append(bgui.Choice(value, tr(f"bg_{name}"), self._thumb(value)))
+        for entry in self.bg_library.list():
+            value = backgrounds.IMAGE_PREFIX + entry.id
+            choices.append(bgui.Choice(value, entry.name, self._thumb(value), removable=True))
+        choices.append(bgui.Choice(bgui.ADD, tr("bg_add")))
+        return choices
+
+    def _toggle_bg_picker(self) -> None:
+        if not self.bg_picker.isVisible():
+            self.bg_picker.set_choices(self._bg_choices(), self.settings.background)
+        self.bg_picker.toggle(self.bg_btn)
+
+    def _on_bg_picked(self, value: str) -> None:
+        if value == bgui.ADD:
+            self.add_backgrounds()
+        else:
+            self._apply_background(value)
+
+    def toggle_background(self) -> None:
+        """B: off, or back to the last background you had."""
+        if self.settings.background != backgrounds.NONE:
+            self._apply_background(backgrounds.NONE)
+        else:
+            self._apply_background(self._bg_last)
+
+    def _apply_background(self, choice: str) -> None:
+        if not backgrounds.is_valid(choice):
+            choice = backgrounds.NONE
+        if choice != backgrounds.NONE:
+            self._bg_last = choice
+        if choice != self.settings.background:
+            self._set("background", choice)
+        on = choice != backgrounds.NONE
+        self.bg_picker.set_selected(choice)
+        self.bg_btn.set_state(on, self._thumb(choice) if on else None)
+        self._bg_token += 1
+        token = self._bg_token
+        kind, _value = backgrounds.parse(choice)
+        if kind in (backgrounds.NONE, backgrounds.BLUR):
+            self.engine.set_background(kind)
+            self.stage.set_backdrop(None)
+            return
+
+        def work() -> None:  # a picture to decode or a preset to paint: off the UI thread
+            try:
+                image = backgrounds.load_choice(choice, self.bg_library)
+            except Exception:
+                log.exception("could not load the background %s", choice)
+                image = None
+            self.bgLoaded.emit((token, choice, image))
+
+        threading.Thread(target=work, name="mirage-background", daemon=True).start()
+
+    def _on_bg_loaded(self, payload) -> None:
+        token, choice, image = payload
+        if token != self._bg_token:
+            return
+        if image is None:
+            self.toast(tr("toast_bg_gone"), "warn")
+            self._apply_background(backgrounds.NONE)
+            return
+        self.engine.set_background("image", image)
+        from mirage.compose import cover
+
+        self.stage.set_backdrop(bgui.to_pixmap(cover(image, 640, 360)).toImage())
+
+    def add_backgrounds(self) -> None:
+        files, _ = QFileDialog.getOpenFileNames(
+            self, tr("bg_dialog_title"), str(Path.home() / "Pictures"),
+            tr("file_filter_images") + " (*.jpg *.jpeg *.png *.webp *.bmp *.heic *.heif *.tif *.tiff)",
+        )
+        if files:
+            self._import_backgrounds([Path(f) for f in files])
+
+    def _import_backgrounds(self, files: list[Path]) -> None:
+        def work() -> None:
+            results = []
+            for path in files:
+                try:
+                    results.append(("ok", self.bg_library.add_file(path)))
+                except (UnreadableImageError, OSError):
+                    results.append(("unreadable", path.name))
+                except Exception:
+                    log.exception("adding the background %s failed", path)
+                    results.append(("unreadable", path.name))
+            self.bgImported.emit(results)
+
+        threading.Thread(target=work, name="mirage-background-import", daemon=True).start()
+
+    def _on_bg_imported(self, results: list) -> None:
+        added = [payload for kind, payload in results if kind == "ok"]
+        for kind, payload in results:
+            if kind == "unreadable":
+                self.toast(tr("toast_bg_unreadable", name=payload), "warn")
+        if added:
+            if len(added) == 1:
+                self.toast(tr("toast_bg_added", name=added[0].name), "success")
+            self.bg_picker.set_choices(self._bg_choices(), self.settings.background)
+            self._apply_background(backgrounds.IMAGE_PREFIX + added[-1].id)
+
+    def _bg_menu(self, value: str, pos: QPointF) -> None:
+        kind, bg_id = backgrounds.parse(value)
+        entry = self.bg_library.get(bg_id) if kind == "image" else None
+        if entry is None:
+            return
+        menu = QMenu(self)
+        menu.addAction(tr("show_in_finder"), lambda: self._reveal_path(self.bg_library.path(bg_id)))
+        menu.addSeparator()
+        menu.addAction(tr("remove"), lambda: self._remove_background(value))
+        menu.exec(pos.toPoint())
+
+    def _remove_background(self, value: str) -> None:
+        _kind, bg_id = backgrounds.parse(value)
+        entry = self.bg_library.get(bg_id)
+        if entry is None:
+            return
+        self.bg_library.remove(bg_id)
+        self._bg_thumbs.pop(value, None)
+        if self._bg_last == value:
+            self._bg_last = backgrounds.BLUR
+        if self.settings.background == value:
+            self._apply_background(backgrounds.NONE)
+        self.bg_picker.set_choices(self._bg_choices(), self.settings.background)
+        self.toast(tr("toast_bg_removed", name=entry.name))
+
+    def _fill_bg_menu(self) -> None:
+        """Live → Background: every choice, the current one ticked."""
+        menu = self._bg_menu_bar
+        menu.clear()
+        for choice in self._bg_choices():
+            if choice.value == bgui.ADD:
+                menu.addSeparator()
+                menu.addAction(tr("menu_add_background"), self.add_backgrounds)
+                continue
+            act = menu.addAction(choice.name, lambda v=choice.value: self._apply_background(v))
+            act.setCheckable(True)
+            act.setChecked(choice.value == self.settings.background)
+
+    def _reveal_path(self, path: Path) -> None:
+        import subprocess
+
+        subprocess.run(["open", "-R", str(path)], check=False)
+
+    # ── hairstyle ────────────────────────────────────────────────────────
+
+    def _refresh_hair(self) -> None:
+        """Wear the selected face's hairstyle (if the switch is on); the template is
+        cut out of its photo once, in the background, and cached."""
+        face_id = self.settings.face_id if self.settings.hair_swap else None
+        if face_id == self._hair_key:
+            return
+        self._hair_key = face_id
+        self._hair_token += 1
+        token = self._hair_token
+        self.engine.set_hair(None)   # never the last face's hair on the new face, not even for a frame
+        if face_id is None:
+            return
+        image_path = self.library.image_path(face_id)
+
+        def work() -> None:
+            from mirage import hair
+
+            try:
+                path = hair.template_path(face_id)
+                template = hair.load_template(path)
+                if template is None:
+                    if not hair.parser_present():
+                        self.hairReady.emit((token, face_id, None, "downloading"))
+                    if hair.ensure_parser() is None:
+                        self.hairReady.emit((token, face_id, None, "failed"))
+                        return
+                    import cv2
+                    import numpy as np
+
+                    from mirage.faces_ai import keypoints
+
+                    image = cv2.imdecode(np.fromfile(image_path, np.uint8), cv2.IMREAD_COLOR)
+                    kps = keypoints(image) if image is not None else None
+                    if kps is None:
+                        self.hairReady.emit((token, face_id, None, "no_face"))
+                        return
+                    template = hair.build_template(image, kps)
+                    try:
+                        hair.save_template(template, path)
+                    except OSError:
+                        log.warning("could not cache the hairstyle of %s", face_id, exc_info=True)
+                self.hairReady.emit((token, face_id, template, None))
+            except Exception:
+                log.exception("preparing the hairstyle of %s failed", face_id)
+                self.hairReady.emit((token, face_id, None, "failed"))
+
+        threading.Thread(target=work, name="mirage-hairstyle", daemon=True).start()
+
+    def _on_hair_ready(self, payload) -> None:
+        token, face_id, template, note = payload
+        if token != self._hair_token:
+            return
+        entry = self.library.get(face_id)
+        name = entry.name if entry is not None else ""
+        if note == "downloading":
+            self.toast(tr("toast_hair_downloading"))
+            return
+        if template is None:
+            self._hair_key = None   # let the next pick or toggle try again
+            self.toast(tr("toast_hair_no_face", name=name) if note == "no_face" else tr("toast_hair_failed"), "warn")
+            return
+        self.engine.set_hair(template)
+        if not template.has_hair:
+            self.toast(tr("toast_hair_bald", name=name))
+
     # ── drag & drop ──────────────────────────────────────────────────────
 
     def _dropped(self, event) -> list[Path]:
@@ -782,6 +1052,7 @@ class MainWindow(QWidget):
             return
         if mode == LIVE:
             self.media.leave()
+        self.bg_picker.close_panel()
         self.pages.setCurrentWidget(self.media if mode == MEDIA else self.pages.widget(0))
         self.grid.set_selected(self.media.selected_id if mode == MEDIA else self.settings.face_id)
         self.mode_switch.set_value(mode, animate=False)
@@ -827,6 +1098,10 @@ class MainWindow(QWidget):
         if field == "show_fps":
             self.stage.show_fps = bool(value)
             self.stage.update()
+        if field == "hair_swap":
+            if value and self.settings.face_id is None:
+                self.toast(tr("hair_needs_face"))
+            self._refresh_hair()
         self._save_timer.start()
 
     def save_state(self) -> Settings:

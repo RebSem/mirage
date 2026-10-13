@@ -21,7 +21,7 @@ Sets up Mirage in $REPO:
   1. checks macOS, Apple Silicon, Homebrew and the Xcode Command Line Tools
   2. installs Python $PY_VERSION with Homebrew if it is missing
   3. creates ./venv and installs requirements.txt
-  4. downloads the face-swap models into ./models and ~/.insightface
+  4. downloads the face-swap and hairstyle models into ./models and ~/.insightface
   5. checks for OBS, which provides the virtual camera Zoom and Meet see
 
 Options:
@@ -199,7 +199,7 @@ fi
 MODELS=("inswapper_128_fp16.onnx")
 # "Best" quality uses GPEN-BFR-256 (third_party/deep-live-cam/modules/processors/frame/face_enhancer_gpen256.py)
 if [[ $WITH_ENHANCER -eq 1 ]]; then MODELS+=("GPEN-BFR-256.onnx"); fi
-info "face swap: ${MODELS[*]}; face detection: buffalo_l"
+info "face swap: ${MODELS[*]}; face detection: buffalo_l; hairstyle: face parsing (53 MB)"
 (
   cd "$REPO"
   "$VPY" - "${MODELS[@]}" <<'PY'
@@ -211,6 +211,10 @@ from modules.model_downloader import ensure_insightface_pack, ensure_model
 failed = [name for name in sys.argv[1:] if ensure_model(name) is None]
 if not ensure_insightface_pack("buffalo_l"):
     failed.append("buffalo_l")
+from mirage.hair import ensure_parser  # "Their hairstyle"; Mirage also fetches it on first use
+
+if ensure_parser() is None:
+    print("note: the hairstyle model didn't download; Mirage tries again when you turn the hairstyle on")
 sys.exit(f"could not download: {', '.join(failed)}" if failed else 0)
 PY
 ) || die "Model download failed. Check your connection and run make install again (downloads resume)."

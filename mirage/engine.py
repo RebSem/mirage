@@ -5,8 +5,13 @@ Three plain Python threads do the work (Python threads avoid Qt's
 
 * capture: reads the camera, keeps only the newest frame, survives short gaps
 * detect: finds and smooths the face on the GPU, paced by the quality preset
-* process: swap (Neural Engine) → post-process → virtual camera, and hands
-  the newest result to the UI
+* process: swap (Neural Engine) → post-process → background and hairstyle →
+  virtual camera, and hands the newest result to the UI
+
+and two more only while a background or a hairstyle is on:
+
+* matte: cuts you out of each frame (Apple Vision), alongside the swap
+* hair: finds your own hair a few times a second (CPU), for the hairstyle
 
 The UI talks to the engine only through methods and Qt signals, all of which
 are safe to call from the UI thread.
@@ -24,8 +29,10 @@ from dataclasses import dataclass
 import numpy as np
 from PySide6.QtCore import QObject, Signal
 
+from mirage import compose
 from mirage.camera import CameraInfo
 from mirage.power import AwakeGuard
+from mirage.scene import BLUR, IMAGE, NONE, Scene
 from mirage.settings import Settings
 from mirage.tracking import FaceSmoother
 from mirage.upstream import configure_upstream
@@ -39,6 +46,10 @@ PREVIEW_MAX_FPS = 30
 MOUTH_MASK_SIZE = 40.0  # upstream slider scale 0..100
 
 ENHANCER_MODULE = "modules.processors.frame.face_enhancer_gpen256"
+MATTE_WAIT_S = 0.25          # how long a frame may wait for its person matte
+MATTE_FIRST_WAIT_S = 3.0     # ...the very first one (Vision loads its model)
+HAIR_EVERY_S = 0.33          # your own hair is looked for about three times a second
+SEGMENT_QUALITY = {"fast": "fast", "balanced": "balanced", "best": "balanced"}
 
 
 @dataclass(frozen=True)
@@ -102,6 +113,11 @@ class LiveEngine(QObject):
         self._color_fix = False
         self._enhancer_state = "off"          # off | loading | ready | failed
         self._awake = AwakeGuard()
+        self.scene = Scene()                  # background + hairstyle, see mirage/scene.py
+        self._matte_cond = threading.Condition()
+        self._matte_job: tuple[int, np.ndarray] | None = None       # (frame id, frame) to cut out
+        self._matte_done: tuple[int, np.ndarray | None] = (0, None)  # (frame id, matte)
+        self._matte_state = "unknown"         # unknown | warming | ready | missing | failed
 
     # ── state ────────────────────────────────────────────────────────────
 
@@ -133,6 +149,8 @@ class LiveEngine(QObject):
         try:
             self._load_models()
             self.modelsState.emit("ready")
+            if self.scene.needs_matte:
+                self._warm_matte()
             return True
         except Exception as exc:
             log.exception("model loading failed")
@@ -163,6 +181,36 @@ class LiveEngine(QObject):
     def set_face(self, embedding: np.ndarray | None) -> None:
         """Swap to this identity (None = show the real face). Instant."""
         self._source = None if embedding is None else _Source(embedding)
+
+    def set_background(self, kind: str, image: np.ndarray | None = None) -> None:
+        """``none`` | ``blur`` | ``image`` (with a BGR picture). Instant."""
+        self.scene.set_background(kind, image)
+        if kind != NONE:
+            self._warm_matte_async()
+
+    def set_hair(self, template) -> None:
+        """Wear this ``hair.HairTemplate`` (None = your own hair). Instant."""
+        self.scene.set_hair(template)
+        if template is not None:
+            self._warm_matte_async()
+
+    def _warm_matte(self) -> None:
+        """Load Vision's person segmentation once, off the UI thread (1–2 s the first time)."""
+        from mirage import matte
+
+        if self._matte_state not in ("unknown", "failed"):
+            return
+        if not matte.available():
+            self._matte_state = "missing"
+            self.notice.emit("warn", "toast_background_missing", {})
+            return
+        self._matte_state = "warming"
+        matte.warm_up()
+        self._matte_state = "ready"
+
+    def _warm_matte_async(self) -> None:
+        if self._matte_state in ("unknown", "failed"):
+            threading.Thread(target=self._warm_matte, name="mirage-matte-warmup", daemon=True).start()
 
     def apply(self, settings: Settings) -> None:
         import modules.globals as G
@@ -290,10 +338,13 @@ class LiveEngine(QObject):
         with self._frame_cond:
             self._latest, self._latest_id = None, 0
         self._targets = (None, [])
+        self._matte_job, self._matte_done = None, (0, None)
         self._threads = [
             threading.Thread(target=self._capture_loop, name="mirage-capture", daemon=True),
             threading.Thread(target=self._detect_loop, name="mirage-detect", daemon=True),
             threading.Thread(target=self._process_loop, name="mirage-process", daemon=True),
+            threading.Thread(target=self._matte_loop, name="mirage-matte", daemon=True),
+            threading.Thread(target=self._hair_loop, name="mirage-hair", daemon=True),
         ]
         for t in self._threads:
             t.start()
@@ -316,6 +367,8 @@ class LiveEngine(QObject):
     def _teardown(self, timeout: float = 6.0) -> None:
         with self._frame_cond:
             self._frame_cond.notify_all()
+        with self._matte_cond:
+            self._matte_cond.notify_all()
         deadline = time.monotonic() + timeout
         for t in self._threads:
             t.join(max(0.0, deadline - time.monotonic()))
@@ -458,6 +511,9 @@ class LiveEngine(QObject):
             source = self._source
             shape, faces = self._targets
             face_found = source is None or bool(faces)
+            cut_out = self.scene.needs_matte and self._matte_state != "missing"
+            if cut_out:
+                self._matte_submit(seen, frame)   # Vision works on it while the face is swapped
             try:
                 if source is not None and faces and shape == frame.shape:
                     out = frame.copy()
@@ -480,6 +536,8 @@ class LiveEngine(QObject):
                     self.notice.emit("warn", "toast_frame_error", {})
                 out = frame
 
+            if cut_out:
+                out = self._dress(seen, frame, out, faces if shape == frame.shape else [], logged)
             if not self._stop.is_set():
                 virtualcam_out.send(out)
             now = time.monotonic()
@@ -492,3 +550,120 @@ class LiveEngine(QObject):
                 fps = fps_count / (now - fps_t0)
                 fps_count, fps_t0 = 0, now
                 self.statsChanged.emit({"fps": fps, "face_found": face_found, "vcam": virtualcam_out.is_streaming()})
+
+    # ── background and hairstyle ─────────────────────────────────────────
+
+    def _dress(self, frame_id: int, frame: np.ndarray, out: np.ndarray, faces: list, logged: set[str]) -> np.ndarray:
+        """Background and hairstyle on a swapped frame; never lets the real room
+        through while a background is on."""
+        alpha = self._matte_take(frame_id)
+        kps = None
+        if self._source is not None and faces:
+            main = max(faces, key=lambda f: float((f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])))
+            kps = np.asarray(main.kps, np.float32)
+        try:
+            if alpha is None:
+                if self.scene.background_kind in (BLUR, IMAGE):   # no matte yet: hide the room
+                    return compose.blurred_background(frame.astype(np.float32), sigma=14.0).astype(np.uint8)
+                return out
+            return self.scene.render(frame, out, alpha, kps)
+        except Exception as exc:
+            kind = f"{type(exc).__name__}: {exc}"[:160]
+            if kind not in logged:
+                logged.add(kind)
+                log.error("background or hairstyle failed:\n%s", traceback.format_exc())
+            return out
+
+    def _matte_submit(self, frame_id: int, frame: np.ndarray) -> None:
+        with self._matte_cond:
+            self._matte_job = (frame_id, frame)
+            self._matte_cond.notify_all()
+
+    def _matte_take(self, frame_id: int) -> np.ndarray | None:
+        """The matte of this frame, or the newest one if it is late (None before the first)."""
+        first = self._matte_done[1] is None
+        deadline = time.monotonic() + (MATTE_FIRST_WAIT_S if first else MATTE_WAIT_S)
+        with self._matte_cond:
+            while self._matte_done[0] < frame_id and not self._stop.is_set():
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self._matte_cond.wait(left)
+            return self._matte_done[1]
+
+    def _matte_loop(self) -> None:
+        import objc
+
+        from mirage import matte
+
+        segmenter = None
+        previous: np.ndarray | None = None
+        logged: set[str] = set()
+        while not self._stop.is_set():
+            with self._matte_cond:
+                if self._matte_job is None:
+                    self._matte_cond.wait(0.1)
+                job, self._matte_job = self._matte_job, None
+            if job is None:
+                if not self.scene.needs_matte:
+                    previous = None
+                continue
+            frame_id, frame = job
+            try:
+                with objc.autorelease_pool():
+                    if segmenter is None:
+                        if not matte.available():
+                            if self._matte_state != "missing":   # the warm-up may have said so already
+                                self.notice.emit("warn", "toast_background_missing", {})
+                            self._matte_state = "missing"
+                            return
+                        segmenter = matte.PersonSegmenter(SEGMENT_QUALITY.get(self._settings.quality, "balanced"))
+                        self._matte_state = "ready"
+                    segmenter.set_quality(SEGMENT_QUALITY.get(self._settings.quality, "balanced"))
+                    raw = segmenter.mask(frame)
+                alpha = compose.refine_matte(raw, frame, previous)
+                previous = alpha
+            except Exception as exc:
+                kind = f"{type(exc).__name__}: {exc}"[:160]
+                if kind not in logged:
+                    logged.add(kind)
+                    log.error("person segmentation failed:\n%s", traceback.format_exc())
+                alpha = previous
+            with self._matte_cond:
+                self._matte_done = (frame_id, alpha)
+                self._matte_cond.notify_all()
+
+    def _hair_loop(self) -> None:
+        """Your own hair, a few times a second, in the canonical square around your face
+        (so it follows your head between updates)."""
+        from mirage import hair
+
+        seen = 0
+        logged: set[str] = set()
+        while not self._stop.is_set():
+            if self.scene.hair_template is None or self._source is None:
+                self._stop.wait(0.2)
+                continue
+            t0 = time.monotonic()
+            seen, frame = self._wait_frame(seen)
+            shape, faces = self._targets
+            if frame is None or not faces:
+                continue
+            try:
+                frame = self._prepare(frame)
+                if shape != frame.shape:
+                    continue
+                main = max(faces, key=lambda f: float((f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1])))
+                canon, _valid = hair.to_canonical(frame, np.asarray(main.kps, np.float32))
+                probs = hair.parse(canon)
+                if self.scene.hair_template is not None:
+                    self.scene.set_user_head(hair.user_head_map(probs), hair.face_width(probs))
+            except Exception as exc:
+                kind = f"{type(exc).__name__}: {exc}"[:160]
+                if kind not in logged:
+                    logged.add(kind)
+                    log.error("finding your hair failed:\n%s", traceback.format_exc())
+                self._stop.wait(1.0)
+            wait = HAIR_EVERY_S - (time.monotonic() - t0)
+            if wait > 0:
+                self._stop.wait(wait)

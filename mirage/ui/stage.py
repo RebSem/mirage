@@ -30,12 +30,17 @@ class Stage(QWidget):
         self._frame: np.ndarray | None = None
         self._image: QImage | None = None
         self._face_missing_since: float | None = None
+        self.backdrop: QImage | None = None   # the chosen background, shown faintly before you go live
         self._spin = 0.0
         self._spinner = QTimer(self)
         self._spinner.setInterval(16)
         self._spinner.timeout.connect(self._tick)
 
     # ── state ────────────────────────────────────────────────────────────
+
+    def set_backdrop(self, image: QImage | None) -> None:
+        self.backdrop = image
+        self.update()
 
     def set_drop_active(self, on: bool) -> None:
         self.drop_active = on
@@ -89,12 +94,14 @@ class Stage(QWidget):
             self._paint_video(p, r)
             p.setClipping(False)
             self._paint_overlays(p, r)
-        elif self.mode in ("loading", "starting"):
-            p.setClipping(False)
-            self._paint_loading(p, r)
         else:
+            if self.backdrop is not None:
+                self._paint_backdrop(p, r)
             p.setClipping(False)
-            self._paint_idle(p, r)
+            if self.mode in ("loading", "starting"):
+                self._paint_loading(p, r)
+            else:
+                self._paint_idle(p, r)
 
         p.setPen(QPen(QColor(255, 255, 255, 30), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
@@ -114,6 +121,17 @@ class Stage(QWidget):
             p.scale(-1, 1)
         p.drawImage(target, img)
         p.restore()
+
+    def _paint_backdrop(self, p: QPainter, r: QRectF) -> None:
+        """The chosen background, dimmed so the words on top stay readable."""
+        img = self.backdrop
+        scale = max(r.width() / img.width(), r.height() / img.height())
+        w, h = img.width() * scale, img.height() * scale
+        p.save()
+        p.setOpacity(0.55)
+        p.drawImage(QRectF(r.center().x() - w / 2, r.center().y() - h / 2, w, h), img)
+        p.restore()
+        p.fillRect(r, QColor(10, 10, 16, 120))
 
     def _chip(self, p: QPainter, text: str, anchor: QPointF, align: str, dot: QColor | None = None,
               bold: bool = False) -> None:

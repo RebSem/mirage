@@ -47,18 +47,10 @@ def _photo_detector():
     return _PHOTO_DETECTOR
 
 
-def embed(image: np.ndarray) -> DetectedFace | None:
-    """Main (largest) face of a BGR photo: its identity embedding and box, or None."""
+def _main_face(image: np.ndarray):
+    """(padded image, pad, insightface Face) of the largest face, or None."""
     from insightface.app.common import Face
 
-    from modules.face_analyser import get_face_analyser
-
-    from mirage.upstream import configure_upstream
-
-    if image is None or image.ndim != 3:
-        return None
-    configure_upstream()  # before the analyser is first created (it caches its config)
-    recognizer = get_face_analyser().models["recognition"]
     detector = _photo_detector()
     for ratio in _PAD_RATIOS:
         pad = int(max(image.shape[:2]) * ratio)
@@ -70,7 +62,34 @@ def embed(image: np.ndarray) -> DetectedFace | None:
             continue
         areas = (bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])
         i = int(areas.argmax())
-        face = Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
+        return probe, pad, Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
+    return None
+
+
+def keypoints(image: np.ndarray) -> np.ndarray | None:
+    """The five points (eyes, nose, mouth corners) of the main face in a BGR photo, or None."""
+    if image is None or image.ndim != 3:
+        return None
+    found = _main_face(image)
+    if found is None:
+        return None
+    _probe, pad, face = found
+    return np.asarray(face.kps, np.float32) - pad
+
+
+def embed(image: np.ndarray) -> DetectedFace | None:
+    """Main (largest) face of a BGR photo: its identity embedding and box, or None."""
+    from modules.face_analyser import get_face_analyser
+
+    from mirage.upstream import configure_upstream
+
+    if image is None or image.ndim != 3:
+        return None
+    configure_upstream()  # before the analyser is first created (it caches its config)
+    recognizer = get_face_analyser().models["recognition"]
+    found = _main_face(image)
+    if found is not None:
+        probe, pad, face = found
         recognizer.get(probe, face)
         gender = age = None
         try:  # for "natural-looking" suggestions in Photos & videos

@@ -54,6 +54,11 @@ class LookPanel(QWidget):
         mouth_row.setToolTip(tr("keep_mouth_hint"))
         lay.addWidget(mouth_row)
 
+        self.hair = self._switch("hair_swap", settings.hair_swap)
+        self.hair_row = labeled_row(_label(tr("hair_swap")), self.hair)
+        self.hair_row.setToolTip(tr("hair_swap_hint"))
+        lay.addWidget(self.hair_row)
+
         self.more_toggle = Disclosure(tr("more_options"))
         self.more_toggle.toggled.connect(self._on_more)
         lay.addWidget(self.more_toggle)
@@ -72,10 +77,11 @@ class LookPanel(QWidget):
         self._mode = "live"
 
     def set_context(self, mode: str) -> None:
-        """Photos & videos only use strength, sharpness, mouth and edges: hide what only calls use."""
+        """Photos & videos only use strength, sharpness, mouth and edges: hide what only calls use
+        (quality, the hairstyle and the call-only options)."""
         self._mode = mode
         media = mode == "media"
-        for w in (self.quality, self.quality_hint, self.more_toggle,
+        for w in (self.quality, self.quality_hint, self.more_toggle, self.hair_row,
                   self._rows["many_faces"], self._rows["color_fix"], self._rows["show_fps"]):
             w.setVisible(not media)
         self.more.setVisible(media or self.more_toggle.isChecked())

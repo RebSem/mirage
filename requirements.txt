@@ -19,3 +19,5 @@ pyvirtualcam==0.15.0; sys_platform == 'darwin'
 pyobjc-framework-Cocoa==12.2.2; sys_platform == 'darwin'
 pyobjc-framework-Quartz==12.2.2; sys_platform == 'darwin'
 pyobjc-framework-AVFoundation==12.2.2; sys_platform == 'darwin'
+# virtual backgrounds and the hairstyle: Apple Vision's person segmentation
+pyobjc-framework-Vision==12.2.2; sys_platform == 'darwin'
