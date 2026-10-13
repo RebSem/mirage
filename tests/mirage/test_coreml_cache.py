@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from mirage.upstream import COREML, coreml_cache_for, with_coreml_cache
 
 
@@ -47,7 +49,7 @@ def test_a_replaced_model_gets_a_new_folder_and_the_old_one_goes(tmp_path):
 
 
 def test_a_broken_cache_falls_back_to_a_plain_load(tmp_path, monkeypatch):
-    import onnxruntime as ort
+    ort = pytest.importorskip("onnxruntime")  # CI installs only the light test dependencies
 
     from mirage import upstream
 
