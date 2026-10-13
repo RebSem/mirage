@@ -47,6 +47,12 @@ def _reduce_transparency() -> bool:
 def glass_supported() -> bool:
     if sys.platform != "darwin":
         return False
+    from PySide6.QtGui import QGuiApplication
+
+    # Only Qt's Cocoa windows are NSWindows; poking AppKit under another platform
+    # plugin (offscreen screenshots, tests) crashes the process.
+    if QGuiApplication.platformName() != "cocoa":
+        return False
     try:
         import AppKit
 
