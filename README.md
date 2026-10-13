@@ -29,8 +29,9 @@ It is a native-looking macOS app (Liquid Glass, English and Russian) built on
 the open-source [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam)
 engine by hacksider and contributors.
 
-**Status:** latest release 0.2.0 (September 2026); `main` has newer, not yet released
-changes, listed in the [changelog](CHANGELOG.md). A spare-time project.
+**Status:** latest release 0.3.0 (October 2026): virtual backgrounds and
+*Their hairstyle*; what changed is in the [changelog](CHANGELOG.md). A
+spare-time project.
 
 > [!IMPORTANT]
 > Only use someone's face if they're fine with it, and tell people it's a
@@ -50,6 +51,14 @@ changes, listed in the [changelog](CHANGELOG.md). A spare-time project.
 - **Batches and videos.** A whole folder of photos in one go. Videos keep
   their sound, and the right face stays on the right person through the whole
   clip.
+- **Virtual backgrounds.** Mirage cuts you out of the picture and puts a
+  background behind you: blur your room, pick one of six built-in ones
+  (studio, office, aurora, …), or drop in your own pictures. The edge is
+  cleaned up, so hair and shoulders don't keep the old wall's colour. `B`
+  turns it on and off.
+- **Their hairstyle.** Wear the hair from the face's photo instead of your
+  own: long, short, curly, even bald. Your own hair is hidden where the new
+  one doesn't cover it (best with a background on).
 - **Look.** Quality presets, swap strength, sharpness, *Keep my mouth* (your
   real mouth, so talking looks natural), face enhancement.
 
@@ -65,6 +74,7 @@ changes, listed in the [changelog](CHANGELOG.md). A spare-time project.
 | Face swap | [Deep-Live-Cam](https://github.com/hacksider/Deep-Live-Cam) engine: [InsightFace](https://github.com/deepinsight/insightface) face detection and recognition, the `inswapper_128` swap model |
 | Speed | [ONNX Runtime](https://onnxruntime.ai) with CoreML: the swap runs on the Apple Neural Engine, face detection on the GPU, side by side. Compiled models are cached, so launches after the first take a few seconds |
 | Face enhancement | [GFPGAN](https://github.com/TencentARC/GFPGAN) for photos, [GPEN](https://github.com/yangxy/GPEN) for the *Best* preset and videos |
+| Backgrounds and hair | Apple's [Vision](https://developer.apple.com/documentation/vision/vngeneratepersonsegmentationrequest) person segmentation (built into macOS, on the Neural Engine) cuts you out; a [BiSeNet face-parsing model](https://github.com/yakhyo/face-parsing) finds the hair for *Their hairstyle* |
 | Video | [FFmpeg](https://ffmpeg.org) with the Mac's hardware H.264 encoder |
 | Calls | [OBS Studio](https://obsproject.com)'s virtual camera through [pyvirtualcam](https://github.com/letmaik/pyvirtualcam) |
 
@@ -104,6 +114,9 @@ where it is (or run `make install-app` again after moving it).
 3. In Zoom: **Settings → Video → Camera → OBS Virtual Camera**. Same idea in
    Meet and other apps.
 4. Switch faces with `1`–`9` during the call, `0` for your own face.
+5. Optional: the round **background** button next to the mirror (or `B`)
+   opens the backgrounds; **Their hairstyle** under *Look* puts on the
+   face's hair. Both work live, during the call.
 
 **Photos and videos**
 
@@ -121,6 +134,7 @@ where it is (or run `make install-app` again after moving it).
 | `⌘O` / `⌘⇧O` | Add face photos / open photos or a video |
 | `⌘S` | Save the swapped photo |
 | `⌘R` | Random face |
+| `B` | Background on / off (back to the last one you used) |
 | `⌘Q` | Quit (stops the camera and any job, deletes an unfinished video) |
 
 ## Your data
@@ -131,9 +145,9 @@ face from thispersondoesnotexist.com.
 
 | What | Where |
 |---|---|
-| Faces and settings | `~/Library/Application Support/Mirage` |
+| Faces, background pictures and settings | `~/Library/Application Support/Mirage` |
 | Swapped photos and videos | next to the originals (`name-mirage.jpg`, `name-mirage.mp4`) |
-| Compiled-model cache (safe to delete) | `~/Library/Caches/Mirage` |
+| Compiled-model and hairstyle cache (safe to delete) | `~/Library/Caches/Mirage` |
 | Logs | `~/Library/Logs/Mirage` |
 
 ## More
@@ -151,7 +165,8 @@ The face swap is the work of [Deep-Live-Cam](https://github.com/hacksider/Deep-L
 by hacksider and [its contributors](https://github.com/hacksider/Deep-Live-Cam/graphs/contributors)
 (based on [roop](https://github.com/s0md3v/roop)), with models by
 [InsightFace](https://github.com/deepinsight/insightface), GFPGAN and GPEN.
-Thank you.
+The hairstyle uses the BiSeNet face-parsing model from
+[yakhyo/face-parsing](https://github.com/yakhyo/face-parsing). Thank you.
 
 Mirage is free software under the [GNU AGPL-3.0](LICENSE) and includes a
 modified copy of the Deep-Live-Cam engine under the same license. The face

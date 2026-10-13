@@ -32,10 +32,14 @@ download step in `scripts/install.sh`, imports `mirage` first.
 ## Runtime picture
 
 ```
-                                ┌─► detect  (GPU, 320 px, paced) ──► latest face boxes
-Camera ─► capture ─► latest ────┤                                          │
-          thread     frame      └─► process (Neural Engine) ◄──────────────┘
-                                    swap ▸ post-process ▸ enhance (Best)
+                                ┌─► detect  (GPU, 320 px, paced) ──► latest face boxes ──┬─► hair (CPU, ~3/s)
+Camera ─► capture ─► latest ────┤                                          │             │   your own hair
+          thread     frame      └─► process (Neural Engine) ◄──────────────┘             │        │
+                                    swap ▸ post-process ▸ enhance (Best)                  │        ▼
+                                      │       ▲ person matte (same frame)                 │      Scene
+                                      │   matte (Vision, Neural Engine) ◄── frame ────────┘        │
+                                      ▼                                                            │
+                                    background ▸ hairstyle  (Scene.render) ◄───────────────────────┘
                                          │
                                          ├─► OBS Virtual Camera (1280x720) ─► Zoom / Meet
                                          └─► UI preview (Qt, ≤ 30 fps)
@@ -62,6 +66,22 @@ camera frame:
   result to the virtual camera and offers it to the preview. It never dies on
   a bad frame: it logs each new kind of error once (with a toast) and sends
   the plain camera frame instead.
+* **matte** (`mirage-matte`), only while a background or the hairstyle is
+  on: the process thread hands it each camera frame before swapping, and it
+  cuts the person out with Apple Vision (`matte.PersonSegmenter`, on the
+  Neural Engine) and refines the mask (`compose.refine_matte`) while the
+  face is being swapped. The process thread then waits for the matte of
+  *that* frame (at most 0.25 s, 3 s for the very first while Vision loads),
+  so the cut-out never lags behind the picture.
+* **hair** (`mirage-hair`), only while the hairstyle is on and a face is
+  swapped: about three times a second it runs the face-parsing model on the
+  CPU (two threads) over the canonical square around your face and hands
+  `Scene` a map of your own hair, skin and face. The map lives in that
+  canonical square, so between updates it follows your head.
+* The process thread finishes each frame with `Scene.render`: the hairstyle
+  takes your own hair off and puts the new one on, the background replaces
+  the room. With a background chosen but no matte yet, it sends a blurred
+  picture rather than your room.
 * With *Fix blue tint* on, both threads swap the red and blue channels of
   each camera frame before using it.
 * Detection and swapping run in parallel, so the GPU and the Neural Engine are
@@ -133,14 +153,19 @@ _on_analyzed, _on_rendered, …  ◄── Qt signals, queued: (token, result or
 | `upstream.py` | configures the Deep-Live-Cam engine once (CoreML, 320 px live detector, compiled-model cache) |
 | `faces_ai.py` | photo → `DetectedFace` (embedding, box, gender, age) with its own 640 px detector; random faces |
 | `camera.py` | camera discovery (AVFoundation order, uid → OpenCV index), OBS camera check |
-| `engine.py` | `LiveEngine`: capture, detect and process threads, virtual camera |
+| `engine.py` | `LiveEngine`: capture, detect, process (and, when needed, matte and hair) threads, virtual camera |
+| `scene.py` | `Scene`: the background and the hairstyle on each swapped frame |
+| `compose.py` | pure image maths: guided filter, push-pull hole filling, cleaning and refining the person matte, edge decontamination, compositing |
+| `matte.py` | `PersonSegmenter`: Apple Vision person segmentation through PyObjC (CVPixelBuffer in, mask out) |
+| `hair.py` | the hairstyle: canonical face square, face-parsing model (download, SHA-256, CPU session), templates and their cache, placing them on a face |
+| `backgrounds.py` | background choices, the built-in backgrounds (painted in code) and `BackgroundLibrary` (your pictures) |
 | `tracking.py` | `FaceSmoother`: steadies the face box and keypoints between detections |
 | `power.py` | `AwakeGuard`: keeps the Mac awake while live, and during batches and video renders |
 | `demo.py` | a fake "Demo" camera (`python -m mirage --demo face.jpg`) |
 | `glass.py` | native Liquid Glass (`NSGlassEffectView`) behind Qt widgets |
 | `i18n.py` | UI strings, English + Russian |
 | `theme.py` | colours, radii, fonts, motion timings (off with Reduce motion), Qt style sheet |
-| `ui/` | main window and widgets; `media_page.py` (Photos & videos: state, jobs, control bar) and `media_view.py` (its stage) |
+| `ui/` | main window and widgets; `backgrounds.py` (the background button and its panel); `media_page.py` (Photos & videos: state, jobs, control bar) and `media_view.py` (its stage) |
 | `media/types.py` | plain data shared by the photo and video pipelines: `TargetFace`, `SourceInfo`, `Plan`, `RenderOptions`, `VideoInfo`, `VideoIdentity`, `VideoProgress` |
 | `media/analyze.py` | every face in a photo: CPU detection at 640 px (+1280 px for small faces), NMS, identity, gender and age, numbered left to right |
 | `media/plan.py` | pure logic: the automatic plan (*This is me*, else the main face), *Give everyone*, suggestions by gender and age |
@@ -158,9 +183,10 @@ All locations can be redirected with the `MIRAGE_HOME` environment variable
 |---|---|
 | `app_support_dir()` | `~/Library/Application Support/Mirage` |
 | `faces_dir()` | `<app_support>/faces` |
+| — | `<app_support>/backgrounds`: your background pictures (`backgrounds.BackgroundLibrary`) |
 | `settings_path()` | `<app_support>/settings.json` |
 | `logs_dir()` | `~/Library/Logs/Mirage` (or `<MIRAGE_HOME>/logs`) |
-| `cache_dir()` | `~/Library/Caches/Mirage` (or `<MIRAGE_HOME>/cache`): compiled CoreML models |
+| `cache_dir()` | `~/Library/Caches/Mirage` (or `<MIRAGE_HOME>/cache`): compiled CoreML models, hairstyle templates (`hair/<face id>-v1.npz`) |
 | `repo_root()` | the checkout (parent of `mirage/`) |
 | `models_dir()` | `<repo_root>/models` |
 
@@ -196,14 +222,18 @@ class Settings:
     me_face_id: str | None = None       # library face marked "This is me" (found first in photos)
     photo_enhance: bool = True          # GFPGAN on swapped faces in photos
     video_enhance: bool = False         # GPEN-BFR-256 in videos (slow on M1)
+    background: str = "none"            # "none" | "blur" | "preset:<name>" | "image:<id>"
+    hair_swap: bool = False             # wear the hairstyle from the face's photo (live)
 
 def load(path: Path | None = None) -> Settings    # missing/corrupt file → defaults
 def save(settings: Settings, path: Path | None = None) -> None   # atomic write
 ```
 
 Unknown keys are ignored; a value of the wrong type falls back to its
-default, `quality`, `language` and `mode` must be one of their choices, and
-`opacity` and `sharpness` are clamped to 0..1. A `me_face_id` whose face was
+default, `quality`, `language` and `mode` must be one of their choices,
+`background` must be a valid choice (`backgrounds.is_valid`: a known preset,
+an image id of 12 hex digits), and `opacity` and `sharpness` are clamped to
+0..1. A `me_face_id` whose face was
 removed is simply ignored.
 
 ### `library.py`
@@ -345,6 +375,9 @@ Methods (call them from the UI thread; only `shutdown()` blocks):
   and never releases the camera under a blocked read.
 * `set_face(embedding | None)`: switch identity instantly; `None` shows the
   real face.
+* `set_background(kind, image=None)`: `none`, `blur` or `image` (a BGR
+  picture); instant. Turning one on warms Vision up in the background.
+* `set_hair(template | None)`: wear this `hair.HairTemplate`; instant.
 * `apply(settings)`: blend, sharpness, mouth mask, many faces, colour fix,
   smooth edges and quality. Choosing Best loads the enhancer in the background
   (downloading GPEN-BFR-256 the first time); choosing Best again after a
@@ -379,6 +412,55 @@ Native view order inside the window frame (bottom → top):
 `NSVisualEffectView` (behind-window blur) → ambient layer →
 `NSGlassEffectView`s → Qt's `QNSView` (all widgets, transparent background).
 
+## Backgrounds and the hairstyle
+
+**Choosing.** `Settings.background` holds one string (see
+`backgrounds.parse`). The main window resolves it off the UI thread (a
+built-in background is painted at 1280×720, a picture is decoded) and hands
+the engine a BGR image; `B` toggles between `none` and the last choice. The
+panel's previews are made once and cached. *Their hairstyle* is per face:
+when the switch is on, the window loads the face's template from
+`cache_dir()/hair` or builds it (face points with the photo detector, then
+`hair.build_template`) on a worker thread, with a token so a slow result for
+the previous face is dropped; meanwhile the engine wears no hairstyle.
+
+**Cutting you out** (`matte.py`, `compose.refine_matte`). Vision returns a
+soft mask at its own resolution (about 512×384 in *balanced*, 4 ms in *fast*,
+20 ms in *balanced* on an M1; Mirage maps *Fast* to fast, *Balanced* and
+*Best* to balanced). `clean_mask` drops faint values and blobs much smaller
+than the people in view; the mask is scaled to the frame and snapped to its
+edges with a guided filter (grey guide, radius 8, at half size), firmed with
+a smoothstep, and blended with the previous matte where it barely changed.
+
+**Compositing** (`compose.py`, `Scene.render`). `behind_person` guesses the
+room behind you at a quarter size by push-pull filling from clearly-background
+pixels. *Blur* blurs that guess (so you leave no halo); an image background is
+scaled to cover the frame once per frame size. `composite` decontaminates the
+soft edge (takes the old wall's colour out where the matte is fairly opaque)
+and blends with `cv2.blendLinear`. About 4–6 ms per 640×480 frame.
+
+**The hairstyle** (`hair.py`). Every head is brought into a canonical
+512×512 square by a similarity transform of its five face points (InsightFace's
+ArcFace template, scaled ×2.2, nose at (256, 270)), with room for big hair.
+`build_template` parses the photo's square (BiSeNet, 19 CelebAMask-HQ
+classes), turns hair + hat into a solid alpha with soft, strand-following
+edges (guided filter), takes what was behind the hair out of its edge colours,
+extends them outwards, and keeps a smooth skin colour and the head's
+silhouette; the face width at the nose is stored too. Live, `place` warps the
+template onto your five points (stretched horizontally by your face width
+over the photo's, 0.85–1.2×) inside the head's bounding box only, together
+with your own head map from the hair thread. `Scene` then, inside that box:
+
+* your hair above the eyebrows and inside the new head becomes skin, filled
+  from your own visible skin (push-pull at a quarter size) with matching
+  grain;
+* your hair beyond the new head, and below the eyebrows outside your face
+  and ears, becomes background (or, without a background, the guessed room);
+* the new hair goes on top, its brightness gently matched to the room's
+  light (from the cheeks).
+
+About 10–16 ms per frame, depending on how big your head is in the picture.
+
 ## Design rules
 
 * One window. Stage (video) left, glass sidebar right, glass control bar
@@ -401,8 +483,10 @@ Native view order inside the window frame (bottom → top):
 settings round-trip, library with a fake embedder, `order_devices`, the
 virtual-camera frame fit, i18n key parity, landmark smoothing, the media
 plan and suggestions, the batch runner with fakes, photo loading and saving
-(orientation, HEIC, EXIF, naming), and the video reader, writer, tracker and
-render with fake models. The video tests that need ffmpeg are skipped when
+(orientation, HEIC, EXIF, naming), the video reader, writer, tracker and
+render with fake models, the matting and compositing maths, the built-in
+backgrounds and the background library, and the hairstyle (templates,
+placing, the scene) with a fake face parser. The video tests that need ffmpeg are skipped when
 it isn't installed. `test_engine_layout.py` checks where the engine lives
 and that importing `mirage` makes it importable.
 

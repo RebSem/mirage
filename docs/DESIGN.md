@@ -26,7 +26,7 @@ Roughly (the widgets in `mirage/ui/` are the source of truth):
 │                                              │ │  Look           │
 └──────────────────────────────────────────────┘ │  Fast|Bal|Best  │
 ┌──────────────────────────────────────────────┐ │  Strength ──●   │
-│ (cam) camera ⌄  [ ▶ Start ]           mirror │ │  More options ⌄ │
+│ (cam) camera ⌄ [ ▶ Start ] background mirror │ │  More options ⌄ │
 └──────────────────────────────────────────────┘ └─────────────────┘
       glass control bar                              glass sidebar
 ```
@@ -53,7 +53,7 @@ Roughly (the widgets in `mirage/ui/` are the source of truth):
   on the selected face.
 - **Control bar** (under the stage, glass): the camera menu (with its own
   chevron) on the left, the one big **Start / Stop** button in the middle,
-  the mirror toggle on the right.
+  the background button and the mirror toggle on the right.
 
 ## Photos & videos
 
@@ -203,6 +203,59 @@ chip, the batch count pills and the status on each batch row.
 pulse, while models load, while the camera starts and while you are live.
 Its width is measured with every digit as wide as the widest one, so a
 changing fps count never makes it wobble.
+
+**Background button and panel** (Live). The background is about where you
+are on the call, so it sits with the video, next to the mirror, like the
+background buttons in Zoom or FaceTime; the sidebar stays about who you are
+and how you look. The button is a 36 pt round button: with no background, the
+*background* icon (a frame with a person in front of it); with one, a tiny
+preview of it with a white silhouette and a teal-blue ring, so you can tell
+it is on without opening anything. Its tooltip says *Background (B)*.
+
+Clicking it opens a panel just above the control bar, its right edge near
+the button: a dark rounded card (22 pt radius, soft shadow, slides up 8 pt
+and fades in over 200 ms) with the title *Background*, *B turns it on and
+off* on the right, one line on what it does, and a grid of 4 columns:
+
+```
+╭──────────────────────────────────────────────╮
+│ Background              B turns it on and off │
+│ Mirage cuts you out of the picture and puts … │
+│  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐       │
+│  │  ⊘   │  │ ░░ ◠ │  │ ▒▒ ◠ │  │ ●● ◠ │       │
+│  └──────┘  └──────┘  └──────┘  └──────┘       │
+│    None      Blur     Studio    Office        │
+│  ┌──────┐  ┌──────┐  ┌──────┐  ┌──────┐       │
+│  │    ◠ │  │    ◠ │  │    ◠ │  │    ◠ │       │
+│  └──────┘  └──────┘  └──────┘  └──────┘       │
+│   Aurora    Sunset    Lagoon   Daylight       │
+│  ┌┄┄┄┄┄┄┐                                     │
+│  ┆  +   ┆  your pictures go before Add…       │
+│  └┄┄┄┄┄┄┘                                     │
+│    Add…                                       │
+╰──────────────────────────────────────────────╯
+```
+
+- Tiles are 96×60 pt with a 10 pt radius, the name under each (11.5 pt;
+  white and semibold when chosen). Each preview has a small dark
+  head-and-shoulders standing in front of it, so a tile reads as "you, in
+  front of this" rather than as a photo. *None* is a quiet tile with ⊘;
+  *Blur* is a frosted, milky picture; **Add…** is dashed with a +.
+- The chosen tile gets the same violet-to-blue ring as the chosen face.
+- Picking a tile applies it at once (live, on the call) and leaves the panel
+  open, so you can try a few; `Esc`, a click outside or the button close it.
+- Drop pictures on the panel to add them (it shows a dashed accent frame
+  while you drag); right-click one of yours for *Show in Finder* and
+  *Remove*.
+- Before you go live, the stage shows the chosen picture faintly behind its
+  idle text, so a pick is visible straight away.
+
+**Their hairstyle.** A switch under *Look*, right after *Keep my mouth*, with
+the tooltip *Wears the hair from the face's photo instead of your own. Looks
+best with a background on.* It belongs to the face, not to the call, so it
+sits with the other face settings; in Photos & videos it is hidden. Turning it
+on with *Me* selected says *Pick a face first: the hairstyle comes from its
+photo.* The first time it downloads its model, a toast says so.
 
 **Disclosure row.** *More options* in the *Look* section is a full-width,
 30 pt row, not an on/off switch: a 12.5 pt label in the secondary colour
@@ -364,6 +417,7 @@ Motion is short and quiet; it confirms an action and gets out of the way.
 |---|---|
 | Button press feedback | 120 ms |
 | Toggles, segmented highlight | 160 ms |
+| Background panel in | 200 ms |
 | Toast in / out | 220 ms / 160 ms |
 | Ambient glow cross-fade | about 0.5 s while live, 0.6 s back to the idle glow |
 
