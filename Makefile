@@ -1,7 +1,7 @@
 # Mirage: everyday commands. Run `make` to list them.
 
 PY := venv/bin/python
-RUFF_VERSION := 0.15.7
+RUFF_VERSION := 0.17.0
 RUFF := $(or $(wildcard venv/bin/ruff),$(shell command -v ruff 2>/dev/null),uvx ruff@$(RUFF_VERSION))
 
 .DEFAULT_GOAL := help

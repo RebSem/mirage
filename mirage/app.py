@@ -81,7 +81,8 @@ def _dark_appearance() -> None:
         pass
 
 
-REQUIRED_PACKAGES = ("PySide6", "numpy", "cv2", "onnxruntime", "insightface", "PIL", "AppKit", "AVFoundation")
+REQUIRED_PACKAGES = ("PySide6", "numpy", "cv2", "onnxruntime", "insightface", "sklearn", "PIL", "AppKit",
+                     "AVFoundation")
 
 
 def _missing_packages() -> list[str]:

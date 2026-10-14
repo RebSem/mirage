@@ -8,6 +8,7 @@ opencv-python-headless==5.0.0.93
 cv2_enumerate_cameras==1.4.0
 onnx==1.23.2
 insightface==2.1
+scikit-learn==1.9.1  # the engine's face clustering (modules/cluster_analysis.py); insightface 2 no longer brings it
 psutil==7.2.2
 PySide6>=6.12.0,<7  # Mirage uses the 6.9 window hints
 pillow==12.3.0

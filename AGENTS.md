@@ -1,7 +1,7 @@
 # AGENTS.md — Mirage
 
 Guide for coding agents (Claude Code, Codex, Cursor, …) working in this repository.
-Checked against the code, git history, CI and GitHub on 2026-10-13.
+Checked against the code, git history, CI and GitHub on 2026-10-14.
 This repository is **public** and **AGPL-3.0** — never commit personal data, local absolute paths, model files, or photos of real people.
 
 ## What this is
@@ -29,10 +29,7 @@ GitHub's language stats ignore `third_party/**` (`linguist-vendored` in `.gitatt
 
 - **Default branch:** `main`. **Version:** `0.3.0` (`mirage/__init__.py: __version__`, tag/GitHub Release `v0.3.0`, CHANGELOG `[0.3.0] - 2026-10-13`): virtual backgrounds and *Their hairstyle* (PR #9), plus everything that was under *Unreleased* since 0.2.0 (engine moved to `third_party/`, clean history, CoreML compiled-model cache, window polish, quick quit, fixes).
 - **CI is green again** since 0.3.0: `tests/mirage/test_coreml_cache.py` skips its onnxruntime test with `pytest.importorskip` (the `mirage-ci` job installs only `numpy opencv-python-headless pillow pytest ruff`). It had been red from 2026-09-29 (`100acd7`) to 0.3.0.
-- **Open PRs (both Dependabot, opened 2026-09-29; their latest CI runs failed with the old onnxruntime error, not because of the bumps — rebase them to re-run):**
-  - **#7** GitHub Actions group: `actions/checkout` v4 → v7, `actions/setup-python` v5 → v7, `astral-sh/ruff-action` 4.0.0 → 4.1.0.
-  - **#8** Python group, 13 updates incl. majors: `opencv-python(-headless)` 4.14.0.94 → 5.0.0.93, `insightface` 0.7.3 → 2.0, `onnxruntime` 1.28.0 → 1.30.0, `onnx` 1.22.0 → 1.23.0, `PySide6>=6.11.2`, `numpy>=2.5.3`, `protobuf>=7.36.2`, `pytest>=9.1.1`, `ruff` 0.15.7 → 0.16.9. Caveats: the ruff bump would desync from `Makefile` (`RUFF_VERSION := 0.15.7`) and both workflows (pinned 0.15.7); `insightface` 0.7.3 → 2.0 and OpenCV 4 → 5 are major-version jumps from the pinned versions and CI does not install either — check with a real `make install` + live/photo/video run before merging. It predates `pyobjc-framework-Vision==12.2.2` in `requirements.txt`; keep all `pyobjc-*` pins on one version.
-  - Earlier single-package Dependabot PRs #1–#5 were closed; #6 (Photos & videos mode) and #9 (backgrounds and hairstyle) were merged.
+- **Dependencies (on `main` since 2026-10-14, after 0.3.0, not released yet):** Dependabot's #7 (GitHub Actions: `checkout` v7, `setup-python` v7, `ruff-action` 4.1.0) and #8 (Python: `insightface` 2.1, `opencv-python(-headless)` 5.0.0.93, `onnxruntime` 1.31.0, `onnx` 1.23.2, `PySide6>=6.12.0`, `numpy>=2.5.3`, `protobuf>=7.36.2`, `tqdm>=4.70.1`, `cv2_enumerate_cameras` 1.4.0, `pytest>=9.1.1`, `ruff` 0.17.0) were merged after a full check on an M1 (fresh venv, real models: face import — embeddings match the 0.7.3 ones at cosine ≈ 0.995 —, live with background + hairstyle, photo + video swap, native-glass window, `run.py --help`; same fps). **insightface 2 no longer installs scikit-learn**, which the engine imports (`modules/cluster_analysis.py`), so `requirements.txt` lists `scikit-learn==1.9.1` and `app.REQUIRED_PACKAGES` checks `sklearn`. No open PRs.
 - **Upstream drift:** `UPSTREAM_COMMIT` = `759e3f9` (Deep-Live-Cam `main`, 2026-09-26). On 2026-10-11 upstream `main` was 10 commits ahead (`a924275`, 2026-10-10), touching `modules/model_downloader.py`, `modules/utilities.py`, `modules/ui.py` (all three carry Mirage changes → expect 3-way conflicts), new `locales/tr.json`, and upstream's `requirements.txt`. 0.3.0 did not touch the engine.
 - **Known gaps:** Intel Macs and macOS < 14 unsupported by design; Liquid Glass only on macOS 26 (older gets a plain dark window); CI runs on Python 3.12 with a light dependency set, so tests that need the heavy stack are skipped there (`importorskip`). Backgrounds and the hairstyle are Live-only (not in Photos & videos). The hairstyle is a flat cut-out that follows the face (no 3D turn) and looks best when the new hair is at least as full as yours; cost on an M1: ~15 fps → ~11 with a background → ~9–10 with the hairstyle too.
 
@@ -88,12 +85,12 @@ make update-engine [REF=<commit>]    # pull upstream Deep-Live-Cam changes (see 
 CI equivalent without the full install (what `mirage-ci` does):
 
 ```bash
-python3 -m venv /tmp/mirage-ci && /tmp/mirage-ci/bin/pip install numpy opencv-python-headless pillow pytest "ruff==0.15.7"
+python3 -m venv /tmp/mirage-ci && /tmp/mirage-ci/bin/pip install numpy opencv-python-headless pillow pytest "ruff==0.17.0"
 /tmp/mirage-ci/bin/ruff check mirage tests scripts third_party
 /tmp/mirage-ci/bin/python -m pytest -q tests/mirage third_party/deep-live-cam/tests
 ```
 
-Verified on 2026-10-13 in a fresh light venv (Python 3.14.7, numpy, opencv-python-headless, pillow, pytest, ruff 0.15.7):
+Verified on 2026-10-13 in a fresh light venv (Python 3.14.7, numpy, opencv-python-headless, pillow, pytest, ruff 0.15.7; on 2026-10-14 also with the full, updated requirements and ruff 0.17.0: 234 passed):
 `ruff check mirage tests scripts third_party` → all checks passed; pytest (CI command) → 230 passed, 3 skipped. In the full `./venv` (with onnxruntime, PySide6, PyObjC Vision): 233 passed. The live engine was also run headless with the demo camera (`--demo`-style `DemoCapturer`) with no background, blur, a built-in background and background + hairstyle, and the window was rendered offscreen with the background panel open.
 **Not run:** `make install` (Homebrew + ~6 GB of packages/models), `make run` / `make classic` with a camera, `make app`, `make bench`, `make update-engine`.
 
@@ -114,7 +111,7 @@ Verified on 2026-10-13 in a fresh light venv (Python 3.14.7, numpy, opencv-pytho
 
 ## Conventions
 
-- Typed Python, short comments that explain *why*. Ruff 0.15.7 is the pinned linter (`Makefile`, both workflows, `requirements-dev.txt`) — keep the pins in sync.
+- Typed Python, short comments that explain *why*. Ruff 0.17.0 is the pinned linter (`Makefile`, both workflows, `requirements-dev.txt`) — keep the pins in sync.
 - **Every UI string goes into `mirage/i18n.py` in English and Russian**; `tests/mirage/test_i18n.py` checks parity. User docs: README in English and Russian (`README.ru.md`) kept in sync; all other docs English.
 - Threads are plain `threading.Thread` (not `QThread`); results go back to the UI thread via queued Qt signals carrying a job **token** (stale results are dropped). See docs/ARCHITECTURE.md.
 - No modal error dialogs during a live session — use toasts (docs/DESIGN.md).
@@ -161,20 +158,21 @@ Upstream's README, media, CI, Windows launchers and other tests are intentionall
 - 2026-09-29 — compiled CoreML model cache (warm-up 15–19 s → 5–7 s), immediate quit, a whole-app review fix batch (`b32db93`).
 - 2026-09-29 — Dependabot PRs #7, #8 opened; CI red since the cache commit's onnxruntime test.
 - 2026-10-13 PR #9 — virtual backgrounds (Apple Vision person segmentation on the Neural Engine, guided-filter matte, edge decontamination, 6 built-in backgrounds painted in code, your own pictures, `B`) and *Their hairstyle* (BiSeNet face parsing, canonical 5-point square, your own hair hidden / re-skinned); background picker is a panel above the control bar (next to the mirror), the hairstyle a switch under *Look*. CI fixed. **v0.3.0**.
+- 2026-10-14 — Dependabot #7 (Actions) and #8 (Python, incl. insightface 2.1, OpenCV 5, ONNX Runtime 1.31, PySide6 6.12, ruff 0.17.0) merged after a full local check; scikit-learn added explicitly.
 
 ## Gotchas
 
 - **`gh` defaults to the `upstream` remote** (hacksider/Deep-Live-Cam) in this checkout: always pass `--repo RebSem/mirage` to `gh pr` / `gh issue` / `gh run` / `gh release`, or you will read (or post to) the wrong project.
 - **Apple Vision is not safe to start from two threads at once:** the first `performRequests` in a process crashes (segfault in `VNGenerateSemanticSegmentationCompoundRequest`) if two threads make it together (e.g. the warm-up and the first live frame). `mirage/matte.py` serializes requests with `_PERFORM_LOCK` and resolves PyObjC symbols under `_LOAD_LOCK` (lazy lookups from two threads raised `KeyError`); use `objc.autorelease_pool()` around Vision calls on worker threads.
-- Rendering the window offscreen (`QT_QPA_PLATFORM=offscreen`, e.g. for screenshots) segfaults in `glass.py` unless `mirage.glass.glass_supported` is patched to return `False` first.
+- Native glass only works on Qt's `cocoa` platform: `glass.glass_supported()` returns `False` under any other (e.g. `QT_QPA_PLATFORM=offscreen` for screenshots); before that check, AppKit calls on non-NSWindows segfaulted. A pip dependency that disappears with a major bump of another (scikit-learn with insightface 2) is caught only by a real run: CI installs the light set.
 
 - **Old clones can't simply `git pull`:** a clone made before the 2026-09-29 history rewrite shares no commits with the current `main` (its root is `f01a8a6`), yet the v0.2.0 release notes say `git pull` to upgrade. Such users need a fresh clone (or `git fetch` + `git reset --hard origin/main`, which discards local changes).
 - `.gitignore` ignores `*.png`, `*.mp4`, `*.mkv` globally (inherited from upstream) with exceptions only for `assets/**/*.png` and `docs/images/*.png` — a new PNG elsewhere is silently ignored. It also ignores `/models` (but `models/instructions.txt` is tracked on purpose) and the whole `/.claude` folder.
 - The first commit contains upstream's demo GIFs (about 67 MB in `media/`, removed later), so a full clone is ~67 MB even though the current tree is small; `gh repo clone RebSem/mirage -- --filter=blob:limit=5m` is faster.
 - `import modules` only works after `import mirage` (or with pytest's configured `pythonpath`).
-- CI uses Python 3.12 and a light install, the app uses Python 3.14 and the full `requirements.txt` — a test that imports a heavy package (onnxruntime, insightface, PySide6) must `pytest.importorskip` it or CI breaks (this is exactly why CI is red now).
+- CI uses Python 3.12 and a light install, the app uses Python 3.14 and the full `requirements.txt` — a test that imports a heavy package (onnxruntime, insightface, PySide6) must `pytest.importorskip` it or CI breaks (that kept CI red from 2026-09-29 to 0.3.0).
 - Compiled CoreML models are cached in `~/Library/Caches/Mirage/coreml`, one folder per model file version (name + size + mtime, because ONNX Runtime keys its cache by path only); a cache that fails to load is deleted and rebuilt. The first launch after install or a model change is slow (~15–19 s on M1), later ones ~5–7 s.
-- `make lint` uses `venv/bin/ruff`, else `ruff` on PATH, else `uvx ruff@0.15.7`.
+- `make lint` uses `venv/bin/ruff`, else `ruff` on PATH, else `uvx ruff@0.17.0`.
 - `Mirage.app` and the repo-folder `Mirage.app` shortcut run this checkout's `venv`; after moving the folder, run `make install-app` again.
 - After pulling the 2026-09-29 engine move into an old checkout, `make install` or `make clean` removes the empty `./modules` folder git leaves behind.
 
