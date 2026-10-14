@@ -11,6 +11,23 @@ Deep-Live-Cam `main` as of September 2026 (commit `759e3f9`).
 
 ## [Unreleased]
 
+### Changed
+
+- Newer libraries underneath (run `make install` after `git pull`):
+  InsightFace 2.1 (was 0.7.3), OpenCV 5.0 (was 4.14), ONNX Runtime 1.31
+  (was 1.28), ONNX 1.23, PySide6 6.12 or newer, NumPy 2.5.3 or newer,
+  protobuf 7.36 or newer. Checked on an M1 with the real models: adding
+  faces (the new embeddings match the saved ones, so your library keeps
+  working), a live session with a background and the hairstyle, photo and
+  video swaps, the window with Liquid Glass, and the classic window's
+  command line. Speed is unchanged.
+- scikit-learn is now listed in `requirements.txt` (the engine's face
+  clustering needs it; InsightFace 2 no longer installs it), and Mirage says
+  so at start if it is missing.
+- Tools: ruff 0.17.0 (`Makefile`, both workflows, `requirements-dev.txt`),
+  pytest 9.1 or newer, and the GitHub Actions `checkout` v7, `setup-python`
+  v7 and `ruff-action` 4.1.0.
+
 ## [0.3.0] - 2026-10-13
 
 Virtual backgrounds and *Their hairstyle* for calls, plus everything below
