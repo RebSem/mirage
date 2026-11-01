@@ -1,7 +1,7 @@
 # Mirage runs on Apple Silicon Macs only (scripts/install.sh checks). This covers Mirage and
 # what the engine in third_party/deep-live-cam needs, `make classic` included; upstream's NSFW
 # filter (opennsfw2 + keras) and its Windows/Linux/Intel packages are left out.
-numpy>=2.5.3,<3
+numpy>=2.5.4,<3
 typing-extensions>=4.16.0
 opencv-python==5.0.0.93
 opencv-python-headless==5.0.0.93
@@ -11,9 +11,9 @@ insightface==2.1
 scikit-learn==1.9.1  # the engine's face clustering (modules/cluster_analysis.py); insightface 2 no longer brings it
 psutil==7.2.2
 PySide6>=6.12.0,<7  # Mirage uses the 6.9 window hints
-pillow==12.3.0
+pillow==13.0.0
 tqdm>=4.70.1
-onnxruntime==1.31.0; sys_platform == 'darwin' and platform_machine == 'arm64'
+onnxruntime==1.31.1; sys_platform == 'darwin' and platform_machine == 'arm64'
 protobuf>=7.36.2,<8
 # Mirage (macOS app): virtual camera output + native Cocoa / AVFoundation glue
 pyvirtualcam==0.15.0; sys_platform == 'darwin'
